@@ -66,6 +66,7 @@ const (
 	ErrRoomFull       = "room_full"
 	ErrGameInProgress = "game_in_progress"
 	ErrNotAllowed     = "not_allowed"
+	ErrBadPattern     = "bad_pattern" // a note-editor part broke a rule; the previous part stays
 )
 
 // Grid sizes. Row 0 is the lowest note of the round's scale.
@@ -107,6 +108,7 @@ type Welcome struct {
 	Token      string `json:"token"`
 	Instrument string `json:"instrument,omitempty"`
 	Steps      *Grid  `json:"steps,omitempty"`
+	Notes      []Note `json:"notes,omitempty"` // the note-editor part, if the phone sent one
 }
 
 // Error is sent to one client. The connection stays open unless the
@@ -160,15 +162,20 @@ type State struct {
 	TVConnected  bool                 `json:"tvConnected"`
 	Categories   []string             `json:"categories"`
 	Patterns     map[int]Grid         `json:"patterns"`
+	Notes        map[int][]Note       `json:"notes,omitempty"` // note-editor parts by seat; seats without notes are left out
 	Live         map[int]int          `json:"live"`
 	Winner       int                  `json:"winner"` // winning round, 0 = none yet
 }
 
 // Pattern: a player's part. Send it on every change during compose.
+// A phone using the note editor sends Notes; the grid-based sequencer sends
+// Steps. Each message replaces the whole part. Steps may be left out when
+// sending Notes; a missing grid decodes as empty.
 type Pattern struct {
 	Envelope
 	Instrument string `json:"instrument,omitempty"`
 	Steps      Grid   `json:"steps"`
+	Notes      []Note `json:"notes,omitempty"`
 }
 
 // Part is one seat's locked pattern.
@@ -176,6 +183,17 @@ type Part struct {
 	Seat       int    `json:"seat"`
 	Instrument string `json:"instrument"`
 	Steps      Grid   `json:"steps"`
+	Notes      []Note `json:"notes,omitempty"`
+}
+
+// Note is one note from the note editor. Times are in steps (StepsPerBeat
+// per beat), so they follow the round's tempo.
+type Note struct {
+	ID         string `json:"id"`                   // unique within the part
+	Row        int    `json:"row"`                  // 0 = lowest note of the scale
+	Start      int    `json:"start"`                // step, 0..LoopSteps-1
+	Length     int    `json:"length"`               // steps, start+length <= LoopSteps
+	Instrument string `json:"instrument,omitempty"` // "" = the player's instrument
 }
 
 // Patterns goes to the TV whenever a pattern changes, and once more when

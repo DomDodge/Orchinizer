@@ -23,6 +23,10 @@ type Bar = { tempo: number };
 const barListeners = new Set<(b: Bar) => void>();
 export const onBar = (f: (b: Bar) => void) => (barListeners.add(f), () => void barListeners.delete(f));
 
+/** The server refused a note-editor part (error code bad_pattern). The previous part is still in state.notes. */
+const rejectListeners = new Set<(message: string) => void>();
+export const onPatternRejected = (f: (message: string) => void) => (rejectListeners.add(f), () => void rejectListeners.delete(f));
+
 let ws: WebSocket | null = null;
 let join: { name: string; room: string; token?: string } | null = null; // room '' = host
 
@@ -79,6 +83,7 @@ function open() {
         sock.close();
       }
       set({ error: m.message, joining: false });
+      if (m.code === 'bad_pattern') rejectListeners.forEach((f) => f(m.message));
     }
   };
   sock.onclose = () => {

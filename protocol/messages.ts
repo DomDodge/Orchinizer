@@ -10,7 +10,8 @@ export type ErrorCode =
   | "room_not_found"
   | "room_full"
   | "game_in_progress"
-  | "not_allowed";
+  | "not_allowed"
+  | "bad_pattern";
 
 export const ROWS = 5;
 export const STEPS = 8;
@@ -42,6 +43,8 @@ export interface Welcome extends Base {
   token: string;
   instrument?: string;
   steps?: Grid;
+  /** The note-editor part, if the phone sent one. */
+  notes?: Note[];
 }
 
 export interface ErrorMsg extends Base {
@@ -94,20 +97,26 @@ export interface State extends Base {
   tvConnected: boolean;
   categories: Category[];
   patterns: Record<string, Grid>;
+  /** Note-editor parts by seat. Seats without notes are left out. */
+  notes?: Record<string, Note[]>;
   live: Record<string, number>;
   winner: number; // winning round, 0 = none
 }
 
+/** A phone using the note editor sends notes; the grid sequencer sends steps. Each message replaces the whole part. */
 export interface Pattern extends Base {
   type: "pattern";
   instrument?: string;
-  steps: Grid;
+  /** Optional when sending notes. A missing grid is read as empty. */
+  steps?: Grid;
+  notes?: Note[];
 }
 
 export interface Part {
   seat: number;
   instrument: string;
   steps: Grid;
+  notes?: Note[];
 }
 
 /** To the TV on every pattern change, and once more with locked=true. */
@@ -247,3 +256,16 @@ export const SEAT_COLORS = [
 ];
 /** Major pentatonic scale degrees as semitones above the tonic; row 0 = index 0. */
 export const MAJOR_PENTATONIC = [0, 2, 4, 7, 9];
+
+// NOTATION ADDITIONS
+export const STEPS_PER_BEAT = 4;  // 16th notes
+export const LOOP_STEPS = 32;     // 2 bars
+export const MAX_NOTES = 16;
+
+export interface Note {
+  id: string;
+  row: number;     // 0 = lowest note in the scale
+  start: number;   // step
+  length: number;  // steps
+  instrument?: string;
+}

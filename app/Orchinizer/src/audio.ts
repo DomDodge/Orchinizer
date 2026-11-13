@@ -28,9 +28,29 @@ export function preload(inst: Voice, key: string) {
   for (let r = 0; r < rows; r++) player(sourceFor(inst, key, r));
 }
 
+/** Pending stops from playNoteFor, by sound, so a replay of the same sound isn't cut short. */
+const stops = new Map<number, ReturnType<typeof setTimeout>>();
+
+/** Play a note for `ms` milliseconds, then stop it (a stretched note). Samples shorter than that end early. */
+export function playNoteFor(inst: Voice, key: string, row: number, ms: number) {
+  const src = sourceFor(inst, key, row);
+  if (src == null) return;
+  playNote(inst, key, row);
+  if (inst === 'drums') return; // hits ring out on their own
+  stops.set(src, setTimeout(() => {
+    stops.delete(src);
+    player(src).pause();
+  }, ms));
+}
+
 export function playNote(inst: Voice, key: string, row: number) {
   const src = sourceFor(inst, key, row);
   if (src == null) return;
+  const pending = stops.get(src);
+  if (pending) {
+    clearTimeout(pending);
+    stops.delete(src);
+  }
   const p = player(src);
   p.shouldCorrectPitch = false;
   p.playbackRate = inst !== 'drums' && keyRoot(key) + SCALE[row] >= 19 ? 2 : 1;

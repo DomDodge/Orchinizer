@@ -30,6 +30,7 @@ const (
 	evJoin eventKind = iota
 	evMessage
 	evLeave
+	evFlush // send pattern changes held back by patternChanged
 )
 
 type event struct {
@@ -52,9 +53,12 @@ type player struct {
 	bot        bool
 	instrument string
 	steps      protocol.Grid
+	notes      []protocol.Note // note-editor part; nil for grid-only phones and bots
 	noteCount  int
 	playing    bool
 	vote       int // round voted for, 0 = none
+
+	lastPattern time.Time // last pattern broadcast, for patternChanged
 }
 
 func (p *player) connected() bool { return p.bot || p.client != nil }
@@ -85,6 +89,7 @@ type Room struct {
 	conductor  int
 	// Last accepted select/volume, for the 10/s limit.
 	lastSelect, lastVolume time.Time
+	flushPending           bool // an evFlush is on its way
 
 	// The game: conductors in order (fixed at start), the round in
 	// progress, and finished performances.
@@ -127,7 +132,7 @@ func (r *Room) post(e event) {
 	select {
 	case r.inbox <- e:
 	case <-r.done:
-		if e.kind != evLeave {
+		if e.kind != evLeave && e.client != nil {
 			e.client.Close()
 		}
 	}
@@ -169,6 +174,10 @@ func (r *Room) handle(e event) {
 		r.onLeave(e.client)
 	case evMessage:
 		r.onMessage(e.client, e.typ, e.raw)
+	case evFlush:
+		r.flushPending = false
+		r.broadcastState()
+		r.sendPatterns()
 	}
 }
 
@@ -263,7 +272,7 @@ func (r *Room) welcomePlayer(p *player) {
 	r.sendTo(p.client, protocol.Welcome{
 		Envelope: r.env(protocol.TypeWelcome), Role: protocol.RolePlayer,
 		Seat: p.seat, Color: p.color, Token: p.token,
-		Instrument: p.instrument, Steps: &steps,
+		Instrument: p.instrument, Steps: &steps, Notes: p.notes,
 	})
 }
 
@@ -324,6 +333,12 @@ func (r *Room) state() protocol.State {
 	s.ServerTime = time.Now().UnixMilli()
 	for _, p := range r.seatOrder() {
 		s.Patterns[p.seat] = p.steps
+		if len(p.notes) > 0 {
+			if s.Notes == nil {
+				s.Notes = map[int][]protocol.Note{}
+			}
+			s.Notes[p.seat] = p.notes
+		}
 		if p.playing {
 			s.Live[p.seat] = p.level
 		}
@@ -348,7 +363,7 @@ func (r *Room) currentParts() []protocol.Part {
 		if p.seat == r.conductor {
 			continue
 		}
-		parts = append(parts, protocol.Part{Seat: p.seat, Instrument: p.instrument, Steps: p.steps})
+		parts = append(parts, protocol.Part{Seat: p.seat, Instrument: p.instrument, Steps: p.steps, Notes: p.notes})
 	}
 	return parts
 }

@@ -29,6 +29,7 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 | Instruments | Humans pick unique instruments from host-enabled strings, wind, percussion, and keys sections. See `InstrumentGroups` / `INSTRUMENT_GROUPS`. Picks persist between rounds and games. Bots fill unused active instruments |
 | Scale | Major pentatonic `[0,2,4,7,9]` semitones above `state.key`. Grid row 0 is the lowest note |
 | Grid | `steps[row][step]`: 5 rows × 8 steps (one bar of eighth notes) |
+| Notes | The note editor's alternative to the grid. Each note is `{id, row, start, length, instrument?}`, with times in steps: 4 per beat (16th notes), and every part loops at 32 steps (2 bars). Up to 16 notes per player. A note fits inside the loop, two notes on the same row can't overlap, and `instrument` (if set) must be enabled in this game |
 | Deadline | Unix **milliseconds**. Phone clocks can be off, so count down with `deadline - serverTime - (Date.now() - receivedAt)`, where `receivedAt` is when that `state` arrived |
 | Rounds | One per real player, so everyone conducts once. Bots never conduct |
 
@@ -42,15 +43,15 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 | type | from → to | key fields |
 |---|---|---|
 | `join` | any → server | `role` (`tv`/`player`), `name`, `token?`. A TV or named player that sends no `room` creates a room |
-| `welcome` | server → joiner | `role`, `seat`, `color`, `token`; for players also `instrument` and `steps` |
-| `error` | server → one client | `code`, `message` |
+| `welcome` | server → joiner | `role`, `seat`, `color`, `token`; for players also `instrument`, `steps` and `notes?` |
+| `error` | server → one client | `code`, `message`. Codes: `bad_message`, `room_not_found`, `room_full`, `game_in_progress`, `not_allowed`, `bad_pattern` |
 | `state` | server → all | full state: `phase`, `round`, `totalRounds`, `host`, `conductor`, `tvConnected`, `categories`, `deadline`, `serverTime`, `key`, `scale`, `tempo`, `instruments`, `players[]`, `patterns`, `live`, `performances`, `winner` |
 | `categories` | host phone → server | `categories: string[]`; lobby only, at least one section; clears disabled picks |
 | `pick` | player → server | `instrument: string \| null`; lobby only, enabled and unique; `null` unpicks |
 | `leave` | player → server | lobby only; removes the seat and frees the pick; host passes to the next human in join order |
 | `kick` | host phone → server | `seat`; lobby only, another online or offline player; frees their pick |
 | `kicked` | server → removed player | before closing the socket; return home and stop automatic reconnects |
-| `pattern` | player → server | `instrument`, `steps`. Send it on every change during compose |
+| `pattern` | player → server | `instrument`, `steps`, `notes?`. Send it on every change during compose. A note-editor phone sends `notes` and may leave out `steps`. An invalid `notes` gets `error` code `bad_pattern`, and the previous part stays. Broadcasts are batched to about 10 per second per player, and the latest change is always sent |
 | `patterns` | server → tv | `round`, `key`, `tempo`, `parts[]`, `locked`. Sent on every pattern change, and again with `locked: true` when compose ends |
 | `calibrated` | conductor → server → tv | `angles` (seat → degrees relative to seat 1). Ends calibrate and starts perform |
 | `select` | conductor → server → tv | `seat`. Max 10/s: the server drops anything faster |
@@ -71,7 +72,7 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 
 ## Game flow
 
-`lobby` → for each round: `compose` (60 s) → `calibrate` (ends when `calibrated` arrives, 30 s cap) → `perform` (45 s) → … → `vote` (30 s) → `results`
+`lobby` → for each round: `compose` (180 s) → `calibrate` (ends when `calibrated` arrives, 30 s cap) → `perform` (45 s) → … → `vote` (30 s) → `results`
 
 - **Start** (`host_action: start`): requires an attached TV and a selected instrument for every connected human. Seats still disconnected are removed, and bots fill up to 4 seats. The conductor order is every real player in join order, so there's one round per player. Bots never conduct or vote.
 - **Each round:** a new `key` and `tempo`. Human instrument picks are restored; bots take unused instruments among the enabled sections. The conductor's `instrument` is `""`, and they sit compose out. Phones should show the "You're conducting!" screen when `state.conductor` matches their seat.

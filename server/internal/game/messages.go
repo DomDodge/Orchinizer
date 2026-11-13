@@ -97,6 +97,11 @@ func (r *Room) onPattern(c Client, p *player, raw []byte) {
 	if !r.decode(c, raw, &m) {
 		return
 	}
+	if err := validateNotes(m.Notes, r.instruments()); err != "" {
+		// The previous part stays.
+		r.sendTo(c, protocol.Error{Envelope: r.env(protocol.TypeError), Code: protocol.ErrBadPattern, Message: err})
+		return
+	}
 	if m.Instrument != "" && m.Instrument != p.instrument {
 		if r.phase != protocol.PhaseLobby {
 			r.reject(c, "Your instrument is locked for this game")
@@ -113,9 +118,27 @@ func (r *Room) onPattern(c Client, p *player, raw []byte) {
 	}
 
 	p.steps = m.Steps
-	p.noteCount = countNotes(m.Steps)
-	r.broadcastState()
-	r.sendPatterns()
+	p.notes = m.Notes
+	p.noteCount = countNotes(m.Steps) + len(m.Notes)
+	r.patternChanged(p)
+}
+
+// patternChanged broadcasts a new part, at most once per minStreamInterval
+// per player. A pattern is always stored right away; when a burst arrives
+// (a phone dragging a note), the broadcast for the latest one is sent by a
+// trailing flush, so no edit is lost.
+func (r *Room) patternChanged(p *player) {
+	now := time.Now()
+	if now.Sub(p.lastPattern) >= minStreamInterval {
+		p.lastPattern = now
+		r.broadcastState()
+		r.sendPatterns()
+		return
+	}
+	if !r.flushPending {
+		r.flushPending = true
+		time.AfterFunc(minStreamInterval, func() { r.post(event{kind: evFlush}) })
+	}
 }
 
 // onConductor validates select, cue, volume, and calibrated, then relays
