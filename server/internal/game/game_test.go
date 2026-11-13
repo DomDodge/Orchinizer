@@ -310,3 +310,31 @@ func TestTVReconnectCatchesUp(t *testing.T) {
 		t.Fatal("reconnected tv didn't get state")
 	}
 }
+
+func TestSelectRateLimit(t *testing.T) {
+	r := newTestRoom()
+	tv := joinTV(r)
+	a := joinPlayer(r, "A")
+	joinPlayer(r, "B")
+	for range 5 { // a burst in the lobby (dev mode): only the first gets through
+		send(r, a, protocol.Select{Envelope: protocol.Envelope{Type: protocol.TypeSelect}, Seat: 2})
+	}
+	n := 0
+	for _, m := range tv.msgs {
+		var e protocol.Envelope
+		json.Unmarshal(m, &e)
+		if e.Type == protocol.TypeSelect {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("tv got %d selects from a burst, want 1", n)
+	}
+	// Cues aren't rate limited.
+	send(r, a, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "1", Seat: 2, Action: "in"})
+	send(r, a, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "2", Seat: 2, Action: "out"})
+	var cue protocol.Cue
+	if !tv.last(protocol.TypeCue, &cue) || cue.ID != "2" {
+		t.Fatalf("second cue dropped: %+v", cue)
+	}
+}

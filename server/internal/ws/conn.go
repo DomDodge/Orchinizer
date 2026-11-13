@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,6 +103,7 @@ func (c *conn) readLoop(ctx context.Context, reg *game.Registry, log *slog.Logge
 			c.sendError(protocol.ErrBadMessage, err.Error())
 			return
 		}
+		j.Room = strings.ToUpper(strings.TrimSpace(j.Room)) // judges type "kxqm"
 		switch {
 		case j.Role == protocol.RoleTV && j.Room == "":
 			room = reg.Create()

@@ -3,12 +3,14 @@
 package main
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
 
+	"orchinizer/protocol"
 	"orchinizer/server/internal/game"
 	"orchinizer/server/internal/ws"
 	"orchinizer/server/web"
@@ -27,6 +29,14 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("GET /ws", ws.Handler(reg, log))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /config", func(w http.ResponseWriter, _ *http.Request) {
+		// Read on every request, so `fly secrets set EXPO_URL=...` (which
+		// restarts the machine) is the only step to change the QR code.
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*") // TV dev server on another port
+		w.Header().Set("Cache-Control", "no-store")
+		json.NewEncoder(w).Encode(protocol.Config{ExpoURL: os.Getenv("EXPO_URL")})
+	})
 	mux.Handle("GET /", http.FileServerFS(web.Static()))
 
 	port := os.Getenv("PORT")

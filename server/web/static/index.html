@@ -3,30 +3,97 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Phone Orchestra server</title>
+<title>Orchestra Debug TV</title>
 <style>
-  body { font: 16px/1.5 system-ui, sans-serif; background: #111; color: #eee; max-width: 720px; margin: 40px auto; padding: 0 16px; }
-  pre { background: #222; padding: 12px; overflow-x: auto; font-size: 13px; }
-  button, input { font: inherit; padding: 4px 10px; }
+  :root { --bg: #111; --fg: #eee; --muted: #999; --panel: #1d1d1d; --accent: #4f8cff; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg: #fafafa; --fg: #111; --muted: #666; --panel: #eee; --accent: #2457c5; } }
+  body { font: 16px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); max-width: 860px; margin: 24px auto; padding: 0 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .code { font: 700 56px/1 ui-monospace, monospace; letter-spacing: 6px; margin: 12px 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+  button, input { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--muted); background: var(--panel); color: var(--fg); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  input { flex: 1; min-width: 200px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td, th { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--panel); }
+  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; }
+  pre { background: var(--panel); padding: 12px; overflow-x: auto; font-size: 12px; max-height: 300px; }
 </style>
 </head>
 <body>
-<h1>Phone Orchestra server</h1>
-<p>This is a placeholder. The real TV page from <code>/tv</code> replaces it in the Docker build.</p>
-<p>Debug TV: <button id="go">Create room</button> <input id="msg" size="50" placeholder='{"type":"host_action","action":"start"}'> <button id="send">Send</button></p>
+<h1>Orchestra debug TV</h1>
+<div class="muted">A placeholder until the real TV page from <code>/tv</code> ships. It hosts a room with no sound, so the server and the phones can be tested together.</div>
+
+<div class="row"><button id="create" class="primary">Create room</button></div>
+<div id="room" hidden>
+  <div class="code" id="code"></div>
+  <div class="muted" id="expo"></div>
+  <div class="row">
+    <button data-host="start" class="primary">Start</button>
+    <button data-host="next">Next phase</button>
+    <button data-host="skip">Skip to vote</button>
+    <button data-host="restart">Restart</button>
+  </div>
+  <div id="summary"></div>
+  <table><thead><tr><th>Seat</th><th>Name</th><th>Instrument</th><th>Notes</th><th>Status</th></tr></thead><tbody id="players"></tbody></table>
+  <div class="row"><input id="msg" placeholder='Raw JSON, e.g. {"type":"bar","bar":1,"tempo":100}'><button id="send">Send</button></div>
+</div>
 <pre id="log"></pre>
+
 <script>
-  const log = (s) => { const el = document.getElementById("log"); el.textContent = s + "\n" + el.textContent; };
-  let ws;
-  document.getElementById("go").onclick = () => {
+  const $ = (id) => document.getElementById(id);
+  const log = (s) => { $("log").textContent = s + "\n" + $("log").textContent.slice(0, 20000); };
+  let ws, offset = 0, state = null, beat = 0, cues = [];
+  const send = (m) => { ws && ws.readyState === 1 && ws.send(JSON.stringify(m)); };
+
+  fetch("/config").then(r => r.json()).then(c => {
+    $("expo").textContent = c.expoUrl ? "QR code target (Expo): " + c.expoUrl : "EXPO_URL isn't set on the server";
+  }).catch(() => {});
+
+  $("create").onclick = () => {
     ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-    ws.onopen = () => ws.send(JSON.stringify({ type: "join", role: "tv" }));
-    ws.onmessage = (e) => log("← " + e.data);
+    ws.onopen = () => send({ type: "join", role: "tv" });
     ws.onclose = () => log("closed");
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.type === "welcome") { $("room").hidden = false; $("code").textContent = m.room; $("create").hidden = true; }
+      if (m.type === "state") { state = m; offset = m.serverTime - Date.now(); render(); return; }
+      // Act like the TV: report every cue as played on the next beat.
+      if (m.type === "cue") cues.push(m);
+      if (m.type !== "select" && m.type !== "volume") log("← " + e.data);
+    };
   };
-  document.getElementById("send").onclick = () => {
-    const v = document.getElementById("msg").value; ws && ws.send(v); log("→ " + v);
-  };
+  document.querySelectorAll("[data-host]").forEach(b => b.onclick = () => send({ type: "host_action", action: b.dataset.host }));
+  $("send").onclick = () => { const v = $("msg").value; ws && ws.send(v); log("→ " + v); };
+
+  // The beat clock: bar messages for the phones, cue_scheduled for cues.
+  (function tick() {
+    const tempo = (state && state.tempo) || 100;
+    if (ws && ws.readyState === 1) {
+      for (const c of cues) send({ type: "cue_scheduled", id: c.id, seat: c.seat, action: c.action, beat });
+      cues = [];
+      if (beat % 4 === 0) send({ type: "bar", bar: beat / 4, tempo });
+      beat++;
+    }
+    setTimeout(tick, 60000 / tempo);
+  })();
+
+  function render() {
+    const s = state;
+    const left = s.deadline ? Math.max(0, Math.round((s.deadline - (Date.now() + offset)) / 1000)) + "s" : "";
+    let text = `<b>${s.phase}</b>` + (s.round ? ` · round ${s.round}/${s.totalRounds}` : "") +
+      (s.conductor ? ` · conductor seat ${s.conductor}` : "") + ` · ${s.key} major pentatonic · ${s.tempo} BPM` + (left ? ` · ${left}` : "");
+    if (s.performances) text += "<br>Votes: " + s.performances.map(p => `round ${p.round} (${p.conductorName}): ${p.votes}`).join(", ");
+    if (s.winner) text += `<br><b>Winner: round ${s.winner}</b>`;
+    $("summary").innerHTML = text;
+    $("players").innerHTML = s.players.map(p => `<tr>
+      <td><span class="dot" style="background:${p.color}"></span> ${p.seat}</td>
+      <td>${esc(p.name)}${p.bot ? " (bot)" : ""}</td><td>${p.instrument || (p.seat === s.conductor ? "conducting" : "")}</td>
+      <td>${p.noteCount}</td><td>${p.connected ? "" : "disconnected "}${p.playing ? "▶ playing " : ""}${p.voted ? "voted" : ""}</td></tr>`).join("");
+  }
+  setInterval(() => state && render(), 1000);
+  function esc(s) { return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 </script>
 </body>
 </html>

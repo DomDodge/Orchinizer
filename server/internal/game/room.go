@@ -77,6 +77,8 @@ type Room struct {
 	group     string
 	locked    bool // patterns are locked (compose is over)
 	conductor int
+	// Last accepted select/volume, for the 10/s limit.
+	lastSelect, lastVolume time.Time
 
 	// The game: conductors in order (fixed at start), the round in
 	// progress, and finished performances.
@@ -251,9 +253,11 @@ func (r *Room) onJoin(c Client, j protocol.Join) {
 }
 
 func (r *Room) welcomePlayer(p *player) {
+	steps := p.steps
 	r.sendTo(p.client, protocol.Welcome{
 		Envelope: r.env(protocol.TypeWelcome), Role: protocol.RolePlayer,
 		Seat: p.seat, Color: p.color, Token: p.token,
+		Instrument: p.instrument, Steps: &steps,
 	})
 }
 
@@ -301,6 +305,7 @@ func (r *Room) state() protocol.State {
 	if !r.deadline.IsZero() {
 		s.Deadline = r.deadline.UnixMilli()
 	}
+	s.ServerTime = time.Now().UnixMilli()
 	for _, p := range r.seatOrder() {
 		s.Players = append(s.Players, protocol.PlayerState{
 			Seat: p.seat, Name: p.name, Color: p.color, Instrument: p.instrument,

@@ -1,6 +1,10 @@
 package game
 
-import "orchinizer/protocol"
+import (
+	"time"
+
+	"orchinizer/protocol"
+)
 
 // onMessage handles every message after join. The phase decides what's
 // accepted; anything else gets a not_allowed error.
@@ -124,6 +128,10 @@ func (r *Room) onConductor(c Client, p *player, typ string, raw []byte) {
 		}
 	}
 
+	if !r.underRate(typ) {
+		return // over 10/s: drop quietly, the next one will carry the latest value
+	}
+
 	var out any
 	switch typ {
 	case protocol.TypeSelect:
@@ -205,4 +213,26 @@ func (r *Room) onCueScheduled(c Client, raw []byte) {
 	}
 	r.players[m.Seat].playing = m.Action == protocol.CueIn
 	r.broadcastState()
+}
+
+// minStreamInterval keeps select and volume at 10/s or less each. A little
+// under 100 ms, so ordinary send jitter doesn't drop messages.
+const minStreamInterval = 90 * time.Millisecond
+
+func (r *Room) underRate(typ string) bool {
+	var last *time.Time
+	switch typ {
+	case protocol.TypeSelect:
+		last = &r.lastSelect
+	case protocol.TypeVolume:
+		last = &r.lastVolume
+	default:
+		return true
+	}
+	now := time.Now()
+	if now.Sub(*last) < minStreamInterval {
+		return false
+	}
+	*last = now
+	return true
 }

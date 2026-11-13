@@ -242,3 +242,44 @@ func TestLobbyDropKeepsSeatAndTVIsProtected(t *testing.T) {
 		t.Fatalf("error %+v", e)
 	}
 }
+
+func TestLowercaseRoomCodeAndWelcomePattern(t *testing.T) {
+	url := setup(t)
+	tv := dial(t, url)
+	tv.send(protocol.Join{Envelope: protocol.Envelope{Type: "join"}, Role: "tv"})
+	var tw protocol.Welcome
+	tv.expect("welcome", &tw)
+	if tw.Steps != nil || tw.Instrument != "" {
+		t.Fatalf("tv welcome has player fields: %+v", tw)
+	}
+
+	a := dial(t, url)
+	a.send(protocol.Join{Envelope: protocol.Envelope{Type: "join", Room: " " + strings.ToLower(tw.Room) + " "}, Role: "player", Name: "Ada"})
+	var w protocol.Welcome
+	a.expect("welcome", &w)
+	if w.Room != tw.Room || w.Steps == nil || w.Instrument == "" {
+		t.Fatalf("welcome %+v", w)
+	}
+
+	// Send a pattern, reconnect: the welcome carries it back.
+	var g protocol.Grid
+	g[1][3] = true
+	a.send(protocol.Pattern{Envelope: protocol.Envelope{Type: "pattern"}, Instrument: "viola", Steps: g})
+	var st protocol.State
+	for {
+		a.expect("state", &st)
+		if st.Players[0].NoteCount == 1 {
+			break
+		}
+	}
+	if st.ServerTime == 0 {
+		t.Fatal("state has no serverTime")
+	}
+	a2 := dial(t, url)
+	a2.send(protocol.Join{Envelope: protocol.Envelope{Type: "join", Room: tw.Room}, Role: "player", Token: w.Token})
+	var w2 protocol.Welcome
+	a2.expect("welcome", &w2)
+	if w2.Steps == nil || *w2.Steps != g || w2.Instrument != "viola" {
+		t.Fatalf("reconnect welcome didn't restore the pattern: %+v", w2)
+	}
+}

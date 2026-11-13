@@ -10,6 +10,13 @@ go test -race ./... && (cd ../protocol && go test ./...)
 ```
 Until `/tv` has a build, `/` is a placeholder page with a debug TV console: it creates a room and lets you send raw JSON.
 
+## Expo URL for the QR code
+The TV reads `GET /config` to get the URL its QR code should open. Set it whenever the Expo tunnel URL changes:
+```sh
+fly secrets set EXPO_URL=exp://xxxx-anonymous-8081.exp.direct -a orchinizer
+```
+This restarts the machine, which **wipes rooms**, so set it before people join.
+
 ## Phase lengths
 Phase lengths can be set with environment variables, in seconds: `COMPOSE_SECONDS` (60), `CALIBRATE_SECONDS` (30, a cap), `PERFORM_SECONDS` (45) and `VOTE_SECONDS` (30). On Fly, set them with `fly secrets set COMPOSE_SECONDS=45` or under `[env]` in `fly.toml`.
 

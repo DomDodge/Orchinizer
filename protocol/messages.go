@@ -90,13 +90,17 @@ type Join struct {
 }
 
 // Welcome: the reply to a join. Store the token so you can reconnect.
-// For the TV, Seat is 0 and Color is empty.
+// For the TV, Seat is 0 and the player fields are left out. For a player,
+// Instrument and Steps are their current part, so a reconnecting phone
+// can restore its sequencer.
 type Welcome struct {
 	Envelope
-	Role  string `json:"role"`
-	Seat  int    `json:"seat"`
-	Color string `json:"color,omitempty"`
-	Token string `json:"token"`
+	Role       string `json:"role"`
+	Seat       int    `json:"seat"`
+	Color      string `json:"color,omitempty"`
+	Token      string `json:"token"`
+	Instrument string `json:"instrument,omitempty"`
+	Steps      *Grid  `json:"steps,omitempty"`
 }
 
 // Error is sent to one client. The connection stays open unless the
@@ -136,6 +140,7 @@ type State struct {
 	TotalRounds int           `json:"totalRounds"` // 0 in the lobby
 	Conductor   int           `json:"conductor"`   // seat, 0 = none
 	Deadline    int64         `json:"deadline"`    // Unix ms the phase ends, 0 = none
+	ServerTime  int64         `json:"serverTime"`  // Unix ms when this state was sent
 	Key         string        `json:"key"`         // tonic, e.g. "C"
 	Scale       string        `json:"scale"`       // "major_pentatonic"
 	Tempo       int           `json:"tempo"`       // BPM
@@ -252,4 +257,11 @@ type Performance struct {
 type Performances struct {
 	Envelope
 	List []Performance `json:"list"`
+}
+
+// Config is served as JSON at GET /config (HTTP, not WebSocket). The TV
+// reads it for the QR code, so the Expo URL lives in one place: the
+// server's EXPO_URL environment variable.
+type Config struct {
+	ExpoURL string `json:"expoUrl"` // e.g. exp://abc-anonymous-8081.exp.direct; "" if not set
 }

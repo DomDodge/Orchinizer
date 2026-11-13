@@ -30,13 +30,18 @@ export interface Join extends Base {
   token?: string;
 }
 
-/** Reply to join. Store the token for reconnecting. TV gets seat 0. */
+/**
+ * Reply to join. Store the token for reconnecting. TV gets seat 0.
+ * Players also get their current part, so a reconnecting phone can restore its sequencer.
+ */
 export interface Welcome extends Base {
   type: "welcome";
   role: Role;
   seat: number;
   color?: string;
   token: string;
+  instrument?: string;
+  steps?: Grid;
 }
 
 export interface ErrorMsg extends Base {
@@ -72,6 +77,11 @@ export interface State extends Base {
   totalRounds: number;
   conductor: number; // seat, 0 = none
   deadline: number; // Unix ms, 0 = none
+  /**
+   * Unix ms when the server sent this state. Count down with
+   * deadline - serverTime - (Date.now() - receivedAt), so a phone's wrong clock doesn't matter.
+   */
+  serverTime: number;
   key: string; // tonic, e.g. "C"
   scale: string; // "major_pentatonic"
   tempo: number; // BPM
@@ -198,6 +208,11 @@ export type ClientMessage =
   | Bar
   | Vote
   | HostAction;
+
+/** GET https://<host>/config (plain HTTP JSON): what the TV's QR code should open. */
+export interface ServerConfig {
+  expoUrl: string; // "" if the server's EXPO_URL isn't set
+}
 
 /** Shared constants. The server is the source of truth; these are for display and dev. */
 export const INSTRUMENT_GROUPS: Record<string, string[]> = {
