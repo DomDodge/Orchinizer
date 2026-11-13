@@ -12,6 +12,10 @@ import (
 // soon as the conductor's phone sends calibrated.
 type Timings struct {
 	Compose, Calibrate, Perform, Vote time.Duration
+	// ReplayClip is how long the TV replays each performance during the vote.
+	// The vote lasts at least one clip per performance (plus a short pad), and
+	// everyone voting early doesn't cut the replays off.
+	ReplayClip time.Duration
 }
 
 var DefaultTimings = Timings{
@@ -19,7 +23,12 @@ var DefaultTimings = Timings{
 	Calibrate: 30 * time.Second,
 	Perform:   45 * time.Second,
 	Vote:      30 * time.Second,
+
+	ReplayClip: 10 * time.Second,
 }
+
+// replayPad is extra vote time after the last replay, to tap a vote.
+const replayPad = 5 * time.Second
 
 type keyTempo struct {
 	key   string
@@ -281,7 +290,14 @@ func (r *Room) startVote() {
 	for _, p := range r.players {
 		p.vote = 0
 	}
-	r.setDeadline(r.timings.Vote)
+	r.voteMinEnd = time.Time{}
+	d := r.timings.Vote
+	if r.timings.ReplayClip > 0 {
+		replays := time.Duration(len(r.performances))*r.timings.ReplayClip + replayPad
+		r.voteMinEnd = time.Now().Add(replays)
+		d = max(d, replays)
+	}
+	r.setDeadline(d)
 	r.log.Info("vote", "performances", len(r.performances))
 	r.broadcastState()
 	r.sendPerformances()
@@ -322,6 +338,15 @@ func (r *Room) maybeEndVote() {
 				return // p can still vote
 			}
 		}
+	}
+	// Everyone has voted. Finish now, unless the TV is still replaying: then
+	// pull the deadline in to the end of the replays.
+	if wait := time.Until(r.voteMinEnd); wait > 0 {
+		if r.deadline.Sub(r.voteMinEnd) > time.Second {
+			r.setDeadline(wait)
+			r.broadcastState()
+		}
+		return
 	}
 	r.stopTimer()
 	r.startResults()

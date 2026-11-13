@@ -1,0 +1,87 @@
+:root {
+  --bg: #0d0e17;
+  --card: #161929;
+  --card-2: #1b1e30;
+  --border: #23273d;
+  --floor: #151829;
+  --text: #f4f1ea;
+  --muted: #a3a8c3;
+  --accent: #f2c14e;
+  --display: 'Bricolage Grotesque', system-ui, sans-serif;
+  --body: 'Inter', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--body);
+}
+
+h1,
+h2,
+.num {
+  font-family: var(--display);
+  font-weight: 800;
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+.btn {
+  background: var(--accent);
+  color: var(--bg);
+  border: 0;
+  border-radius: 999px;
+  padding: 18px 40px;
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 28px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 20px;
+}
+
+.frame {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.dot-beat {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 0.06s;
+}
+.dot-beat.on {
+  background: var(--accent);
+}

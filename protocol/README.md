@@ -80,7 +80,7 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 - **Calibrate:** the conductor may send `select` and `calibrated`. `calibrated` starts perform right away.
 - **Perform:** the conductor may send `select`, `cue` and `volume`. The TV's `cue_scheduled` messages make up the replay log.
 - **A conductor who is disconnected when their round starts is skipped.**
-- **Vote:** the TV gets `performances` (everything needed for replays). You can't vote for a round you conducted. You can change your vote; the last one counts. The vote ends early once everyone eligible has voted. `state.performances` holds the live counts.
+- **Vote:** the TV gets `performances` (everything needed for replays). You can't vote for a round you conducted. You can change your vote; the last one counts. The vote ends early once everyone eligible has voted. `state.performances` holds the live counts. The vote lasts at least one replay clip per performance plus 5 s (10 s clips by default), and everyone voting early pulls the deadline in to the end of the replays instead of cutting them off.
 - **Results:** `state.winner` is the winning round, and a tie goes to the earlier round. The game stays here until `next` or `restart`, which go back to the lobby with the same players.
 - **Host actions:** `next` ends the current phase now. `skip` jumps to the vote, keeping the performance in progress (with no performances it goes back to the lobby). `restart` goes back to the lobby from anywhere.
 - **Stale conductor messages:** `select` and `volume` from a non-conductor, or in the wrong phase, are dropped silently, because they stream and some always arrive just after a phase change. `cue` and `calibrated` get an `error`.
