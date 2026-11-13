@@ -43,7 +43,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "node --test src/*.test.ts scripts/*.test.mts"
+    "test": "node --test src/*.test.ts scripts/*.test.mts",
+    "test:integration": "node --test scripts/integration.mts"
   },
   "private": true
 }

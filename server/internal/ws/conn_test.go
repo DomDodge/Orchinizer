@@ -257,7 +257,7 @@ func TestLowercaseRoomCodeAndWelcomePattern(t *testing.T) {
 	a.send(protocol.Join{Envelope: protocol.Envelope{Type: "join", Room: " " + strings.ToLower(tw.Room) + " "}, Role: "player", Name: "Ada"})
 	var w protocol.Welcome
 	a.expect("welcome", &w)
-	if w.Room != tw.Room || w.Steps == nil || w.Instrument == "" {
+	if w.Room != tw.Room || w.Steps == nil || w.Instrument != "" {
 		t.Fatalf("welcome %+v", w)
 	}
 

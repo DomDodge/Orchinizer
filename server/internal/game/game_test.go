@@ -71,6 +71,12 @@ func joinTV(r *Room) *fakeClient {
 func joinPlayer(r *Room, name string) *fakeClient {
 	c := &fakeClient{}
 	r.handle(event{kind: evJoin, client: c, join: protocol.Join{Role: protocol.RolePlayer, Name: name}})
+	for _, inst := range r.instruments() {
+		if r.setPick(r.playerByClient(c), inst) == "" {
+			break
+		}
+	}
+	r.broadcastState()
 	return c
 }
 

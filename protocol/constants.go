@@ -7,10 +7,13 @@ const (
 	MaxPlayers = 8
 )
 
-// InstrumentGroups: each round is dealt from one group. Strings is the
-// only group for now.
+// Categories are presented in this order in every lobby.
+var CategoryNames = []string{"strings", "wind", "percussion", "keys"}
 var InstrumentGroups = map[string][]string{
-	"strings": {"contrabass", "cello", "viola", "violin"},
+	"strings":    {"contrabass", "cello", "viola", "violin", "harp", "guitar"},
+	"wind":       {"flute", "clarinet", "sax", "trumpet", "trombone", "tuba"},
+	"percussion": {"drums", "timpani", "xylophone", "bongos"},
+	"keys":       {"piano", "organ", "synth"},
 }
 
 // SeatColors[seat-1] is that seat's color.

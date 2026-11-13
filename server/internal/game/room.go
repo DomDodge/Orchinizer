@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -41,6 +42,9 @@ type event struct {
 
 type player struct {
 	seat       int
+	joined     int
+	pick       string
+	level      int
 	name       string
 	color      string
 	token      string
@@ -69,14 +73,16 @@ type Room struct {
 	tvToken string
 	players map[int]*player // by seat
 
-	phase     string
-	deadline  time.Time
-	timer     *time.Timer // fires at deadline; nil when the phase has none
-	key       string
-	tempo     int
-	group     string
-	locked    bool // patterns are locked (compose is over)
-	conductor int
+	phase      string
+	deadline   time.Time
+	timer      *time.Timer // fires at deadline; nil when the phase has none
+	key        string
+	tempo      int
+	categories []string
+	sequence   int
+	pending    map[string]protocol.Cue
+	locked     bool // patterns are locked (compose is over)
+	conductor  int
 	// Last accepted select/volume, for the 10/s limit.
 	lastSelect, lastVolume time.Time
 
@@ -92,17 +98,18 @@ type Room struct {
 
 func newRoom(code string, reg *Registry, log *slog.Logger, t Timings) *Room {
 	return &Room{
-		code:    code,
-		reg:     reg,
-		log:     log,
-		timings: t,
-		inbox:   make(chan event, 256),
-		done:    make(chan struct{}),
-		players: map[int]*player{},
-		phase:   protocol.PhaseLobby,
-		key:     "C",
-		tempo:   100,
-		group:   "strings",
+		code:       code,
+		reg:        reg,
+		log:        log,
+		timings:    t,
+		inbox:      make(chan event, 256),
+		done:       make(chan struct{}),
+		players:    map[int]*player{},
+		phase:      protocol.PhaseLobby,
+		key:        "C",
+		tempo:      100,
+		categories: append([]string{}, protocol.CategoryNames...),
+		pending:    map[string]protocol.Cue{},
 	}
 }
 
@@ -205,6 +212,10 @@ func (r *Room) onJoin(c Client, j protocol.Join) {
 			r.broadcastState()
 			return
 		}
+		if j.Token != "" {
+			r.fail(c, protocol.ErrNotAllowed, "Your seat expired or was removed. Join the room again.")
+			return
+		}
 		if r.phase != protocol.PhaseLobby {
 			r.fail(c, protocol.ErrGameInProgress, "the game has already started")
 			return
@@ -222,25 +233,20 @@ func (r *Room) onJoin(c Client, j protocol.Join) {
 			name = string([]rune(name)[:16])
 		}
 		seat := r.freeSeat()
-		if seat == 0 {
-			// Full: give the seat of someone who left the lobby to the newcomer.
-			if p := r.firstDisconnected(); p != nil {
-				delete(r.players, p.seat)
-				seat = p.seat
-			}
-		}
+
 		if seat == 0 {
 			r.fail(c, protocol.ErrRoomFull, "the room is full")
 			return
 		}
-		inst := protocol.InstrumentGroups[r.group]
+		r.sequence++
 		p := &player{
-			seat:       seat,
-			name:       name,
-			color:      protocol.SeatColors[seat-1],
-			token:      newToken(),
-			client:     c,
-			instrument: inst[(seat-1)%len(inst)],
+			seat:   seat,
+			name:   name,
+			color:  protocol.SeatColors[seat-1],
+			token:  newToken(),
+			client: c,
+			joined: r.sequence,
+			level:  80,
 		}
 		r.players[seat] = p
 		r.welcomePlayer(p)
@@ -264,6 +270,7 @@ func (r *Room) welcomePlayer(p *player) {
 func (r *Room) onLeave(c Client) {
 	if c == r.tv {
 		r.tv = nil
+		r.broadcastState()
 		r.log.Info("tv left")
 		return
 	}
@@ -290,23 +297,36 @@ func (r *Room) env(typ string) protocol.Envelope {
 
 func (r *Room) state() protocol.State {
 	s := protocol.State{
-		Envelope:    r.env(protocol.TypeState),
-		Phase:       r.phase,
-		Round:       r.round,
-		TotalRounds: len(r.order),
-		Conductor:   r.conductor,
-		Key:         r.key,
-		Scale:       protocol.ScaleMajorPentatonic,
-		Tempo:       r.tempo,
-		Instruments: protocol.InstrumentGroups[r.group],
-		Players:     []protocol.PlayerState{},
-		Winner:      r.winner,
+		Envelope:     r.env(protocol.TypeState),
+		Phase:        r.phase,
+		Round:        r.round,
+		TotalRounds:  len(r.order),
+		Conductor:    r.conductor,
+		Key:          r.key,
+		Scale:        protocol.ScaleMajorPentatonic,
+		Tempo:        r.tempo,
+		Instruments:  r.instruments(),
+		Host:         r.hostSeat(),
+		TVConnected:  r.tv != nil,
+		Categories:   append([]string{}, r.categories...),
+		Patterns:     map[int]protocol.Grid{},
+		Live:         map[int]int{},
+		Performances: []protocol.PerformanceSummary{},
+		Players:      []protocol.PlayerState{},
+		Winner:       r.winner,
+	}
+	if r.phase == protocol.PhaseLobby {
+		s.Conductor = s.Host
 	}
 	if !r.deadline.IsZero() {
 		s.Deadline = r.deadline.UnixMilli()
 	}
 	s.ServerTime = time.Now().UnixMilli()
 	for _, p := range r.seatOrder() {
+		s.Patterns[p.seat] = p.steps
+		if p.playing {
+			s.Live[p.seat] = p.level
+		}
 		s.Players = append(s.Players, protocol.PlayerState{
 			Seat: p.seat, Name: p.name, Color: p.color, Instrument: p.instrument,
 			Connected: p.connected(), Bot: p.bot,
@@ -408,6 +428,7 @@ func (r *Room) seatOrder() []*player {
 			out = append(out, p)
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].joined < out[j].joined })
 	return out
 }
 
@@ -418,16 +439,6 @@ func (r *Room) freeSeat() int {
 		}
 	}
 	return 0
-}
-
-// firstDisconnected returns the lowest disconnected human seat, or nil.
-func (r *Room) firstDisconnected() *player {
-	for _, p := range r.seatOrder() {
-		if !p.connected() {
-			return p
-		}
-	}
-	return nil
 }
 
 func (r *Room) playerByToken(tok string) *player {

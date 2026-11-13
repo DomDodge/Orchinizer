@@ -16,8 +16,11 @@ function player(source: number) {
   return p;
 }
 
-const sourceFor = (inst: Voice, key: string, row: number) =>
-  inst === 'drums' ? SOUNDS.drums[row] : SOUNDS[inst][keyRoot(key) + SCALE[row]];
+function sourceFor(inst: Voice, key: string, row: number) {
+  if (inst === 'drums') return SOUNDS.drums[row];
+  const semitone = keyRoot(key) + SCALE[row];
+  return SOUNDS[inst][semitone >= SOUNDS[inst].length ? semitone - 12 : semitone];
+}
 
 /** Create the players for an instrument up front so the first tap isn't late. */
 export function preload(inst: Voice, key: string) {
@@ -29,6 +32,8 @@ export function playNote(inst: Voice, key: string, row: number) {
   const src = sourceFor(inst, key, row);
   if (src == null) return;
   const p = player(src);
+  p.shouldCorrectPitch = false;
+  p.playbackRate = inst !== 'drums' && keyRoot(key) + SCALE[row] >= 19 ? 2 : 1;
   p.seekTo(0);
   p.play();
 }

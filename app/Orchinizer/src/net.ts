@@ -15,8 +15,6 @@ const subscribe = (l: () => void) => (listeners.add(l), () => void listeners.del
 const getSnap = () => snap;
 export const useNet = () => useSyncExternalStore(subscribe, getSnap, getSnap); // 3rd arg: web server render
 
-/** Survives reconnects (not app reloads), which is what gets a sleeping phone its seat back. */
-const myId = Math.random().toString(36).slice(2) + Date.now().toString(36);
 /** serverTime - localTime */
 let offset = 0;
 export const serverNow = () => Date.now() + offset;
@@ -26,40 +24,61 @@ const barListeners = new Set<(b: Bar) => void>();
 export const onBar = (f: (b: Bar) => void) => (barListeners.add(f), () => void barListeners.delete(f));
 
 let ws: WebSocket | null = null;
-let join: { name: string; room: string } | null = null; // room '' = host
+let join: { name: string; room: string; token?: string } | null = null; // room '' = host
 
 /** No room = host a new one. */
 export function connect(name: string, room = '') {
   if (!SERVER_URL) return set({ error: 'The game server is not configured yet.', joining: false });
+  const previous = ws;
+  ws = null;
+  previous?.close();
   join = { name, room: room.trim().toUpperCase() };
-  set({ error: null, joining: true });
+  set({ error: null, joining: true, state: null, seat: 0, connected: false });
   open();
 }
 
 function open() {
-  const sock = new WebSocket(SERVER_URL);
+  let sock: WebSocket;
+  try {
+    sock = new WebSocket(SERVER_URL);
+  } catch {
+    join = null;
+    set({ error: 'The game server address is invalid.', joining: false });
+    return;
+  }
+  let welcomed = false;
   ws = sock;
   sock.onopen = () => {
+    if (ws !== sock) return;
     set({ connected: true });
-    if (join) send({ type: 'join', role: 'player', id: myId, name: join.name, ...(join.room && { room: join.room }) });
+    if (join) send({ type: 'join', role: 'player', name: join.name, ...(join.token && { token: join.token }), ...(join.room && { room: join.room }) });
   };
   sock.onmessage = (e) => {
+    if (ws !== sock) return;
     const m: ServerMsg = JSON.parse(String(e.data));
     if (m.type === 'state') {
-      offset = m.serverNow - Date.now();
+      offset = m.serverTime - Date.now();
       set({ state: m, joining: false });
     } else if (m.type === 'welcome') {
-      if (join) join.room = m.room; // reconnects rejoin the same room instead of hosting a new one
+      welcomed = true;
+      if (join) {
+        join.room = m.room ?? join.room;
+        join.token = m.token;
+      }
       set({ seat: m.seat, error: null });
     }
     else if (m.type === 'bar') barListeners.forEach((f) => f({ tempo: m.tempo }));
     else if (m.type === 'kicked') {
       join = null; // don't auto-rejoin
       sock.close();
-      set({ state: null, seat: 0, joining: false, error: 'You were removed from the room' });
+      set({ connected: false, state: null, seat: 0, joining: false, error: 'You were removed from the room' });
     } else if (m.type === 'error') {
-      if (!snap.state) join = null; // failed join: stop retrying
-      set({ error: m.msg, joining: false });
+      if (!welcomed) {
+        join = null;
+        set({ state: null, seat: 0 });
+        sock.close();
+      }
+      set({ error: m.message, joining: false });
     }
   };
   sock.onclose = () => {
@@ -67,7 +86,7 @@ function open() {
     ws = null;
     set({ connected: false });
     if (!join) return; // intentional leave, removal, or a rejected join: keep its message
-    if (!snap.state) {
+    if (!snap.state && !join.token) {
       // Never got into a room: say so instead of retrying silently.
       join = null;
       return set({ joining: false, error: `Can't reach the server at ${SERVER_URL}` });

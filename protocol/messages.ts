@@ -21,7 +21,7 @@ interface Base {
   room?: string;
 }
 
-/** First message on every connection. TV with no room creates one. */
+/** First message. A TV or named player without room creates one. */
 export interface Join extends Base {
   type: "join";
   role: Role;
@@ -54,7 +54,7 @@ export interface PlayerState {
   seat: number; // 1-based
   name: string;
   color: string; // "#rrggbb"
-  instrument: string; // dealt at join; a pattern message can change it
+  instrument: string; // picked in lobby; empty while conducting
   connected: boolean;
   bot: boolean;
   noteCount: number;
@@ -66,6 +66,8 @@ export interface PerformanceSummary {
   round: number;
   conductorSeat: number;
   conductorName: string;
+  key: string;
+  tempo: number;
   votes: number;
 }
 
@@ -87,13 +89,18 @@ export interface State extends Base {
   tempo: number; // BPM
   instruments: string[];
   players: PlayerState[];
-  performances: PerformanceSummary[] | null;
+  performances: PerformanceSummary[];
+  host: number;
+  tvConnected: boolean;
+  categories: Category[];
+  patterns: Record<string, Grid>;
+  live: Record<string, number>;
   winner: number; // winning round, 0 = none
 }
 
 export interface Pattern extends Base {
   type: "pattern";
-  instrument: string;
+  instrument?: string;
   steps: Grid;
 }
 
@@ -195,7 +202,8 @@ export type ServerMessage =
   | Cue
   | Volume
   | Bar
-  | Performances;
+  | Performances
+  | Kicked;
 
 export type ClientMessage =
   | Join
@@ -207,7 +215,12 @@ export type ClientMessage =
   | CueScheduled
   | Bar
   | Vote
-  | HostAction;
+  | HostAction
+  | AllOut
+  | Categories
+  | Pick
+  | Leave
+  | Kick;
 
 /** GET https://<host>/config (plain HTTP JSON): what the TV's QR code should open. */
 export interface ServerConfig {
@@ -215,8 +228,18 @@ export interface ServerConfig {
 }
 
 /** Shared constants. The server is the source of truth; these are for display and dev. */
-export const INSTRUMENT_GROUPS: Record<string, string[]> = {
-  strings: ["contrabass", "cello", "viola", "violin"],
+export type Category = "strings" | "wind" | "percussion" | "keys";
+export interface AllOut extends Base { type: "cue"; id: string; seat: 0; action: "all_out" }
+export interface Categories extends Base { type: "categories"; categories: Category[] }
+export interface Pick extends Base { type: "pick"; instrument: string | null }
+export interface Leave extends Base { type: "leave" }
+export interface Kick extends Base { type: "kick"; seat: number }
+export interface Kicked extends Base { type: "kicked" }
+export const INSTRUMENT_GROUPS: Record<Category, string[]> = {
+  strings: ["contrabass", "cello", "viola", "violin", "harp", "guitar"],
+  wind: ["flute", "clarinet", "sax", "trumpet", "trombone", "tuba"],
+  percussion: ["drums", "timpani", "xylophone", "bongos"],
+  keys: ["piano", "organ", "synth"],
 };
 export const SEAT_COLORS = [
   "#e6194b", "#3cb44b", "#ffe119", "#4363d8",

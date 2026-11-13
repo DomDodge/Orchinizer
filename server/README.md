@@ -37,3 +37,13 @@ go run ./cmd/fakeclients -tv -start 6 -q
 ./server/deploy.sh             # from anywhere; builds with the repo root as the context
 ```
 Rooms live in memory, so the app must run on **exactly one machine** that never auto-stops. `deploy.sh` passes `--ha=false`, and `fly.toml` turns auto-stop off.
+
+## Phone frontend integration
+
+Use the matching frontend and shared protocol revision. A named player may create a room by omitting `room` from `join`; the first human in join order is the host. The host enables sections, players pick unique instruments, and the host can remove online/offline players in the lobby. Picks remain reserved across disconnects and persist through conductor rotation and game restarts.
+
+The TV joins an existing phone-created room with `{"type":"join","role":"tv","room":"ABCD"}`. Start requires an attached TV and picks for every connected human. The host phone can send `host_action: start` and `restart`. TV phase controls and audio messages are unchanged; the TV UI is not part of this integration.
+
+`state` includes `host`, `tvConnected`, `categories`, per-seat `patterns`, and `live` volumes. It always sends a `performances` array. Invalid reconnect tokens are rejected to prevent removed clients automatically reclaiming a seat.
+
+Run `npm run test:integration` from `app/Orchinizer/` to build an isolated local server and exercise the actual phone network module through a two-round game with a simulated TV. This does not use the deployed server.

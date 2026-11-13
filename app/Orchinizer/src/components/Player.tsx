@@ -1,10 +1,10 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { send, useSecondsLeft } from '../net';
+import { send, useSecondsLeft, useNet } from '../net';
 import { instrumentInfo, type Player, type State } from '../protocol';
 import { BeatRing } from './Pulse';
-import { BG, DIM, FG, H1, P, Screen, SeatBadge, Timer } from './ui';
+import { BG, Btn, DIM, FG, H1, P, Screen, SeatBadge, Timer } from './ui';
 
 /** Everyone except the conductor during calibrate: show the seat number big so the conductor can find you. */
 export function HoldUp({ state, me }: { state: State; me: Player }) {
@@ -57,8 +57,8 @@ export function Vote({ state, me }: { state: State; me: Player }) {
       <H1>🗳️ Best performance?</H1>
       <Timer left={left} />
       {state.performances.map((pf) => {
-        const own = pf.conductor === me.seat;
-        const color = state.players.find((p) => p.seat === pf.conductor)?.color ?? FG;
+        const own = pf.conductorSeat === me.seat;
+        const color = state.players.find((p) => p.seat === pf.conductorSeat)?.color ?? FG;
         return (
           <Pressable
             key={pf.round}
@@ -70,7 +70,7 @@ export function Vote({ state, me }: { state: State; me: Player }) {
             }}
             style={[styles.vote, { borderColor: color, backgroundColor: mine === pf.round ? color : 'transparent', opacity: own ? 0.35 : 1 }]}
           >
-            <Text style={[styles.voteName, { color: mine === pf.round ? BG : color }]}>{pf.name}</Text>
+            <Text style={[styles.voteName, { color: mine === pf.round ? BG : color }]}>{pf.conductorName}</Text>
             <Text style={{ color: mine === pf.round ? BG : DIM }}>
               Round {pf.round} · key of {pf.key} · {own ? 'yours' : `${pf.votes} votes`}
             </Text>
@@ -82,13 +82,15 @@ export function Vote({ state, me }: { state: State; me: Player }) {
 }
 
 export function Results({ state }: { state: State }) {
+  const { seat } = useNet();
   const win = state.performances.find((p) => p.round === state.winner);
-  const color = state.players.find((p) => p.seat === win?.conductor)?.color ?? FG;
+  const color = state.players.find((p) => p.seat === win?.conductorSeat)?.color ?? FG;
   return (
     <Screen style={{ justifyContent: 'center' }}>
       <Text style={styles.crown}>👑</Text>
-      <H1 color={color}>{win ? `${win.name} wins!` : 'Show’s over'}</H1>
+      <H1 color={color}>{win ? `${win.conductorName} wins!` : 'Show’s over'}</H1>
       {win && <P>{win.votes} votes · watch the TV for the replay</P>}
+      {state.host === seat && <Btn label="Back to lobby" onPress={() => send({ type: 'host_action', action: 'restart' })} />}
     </Screen>
   );
 }

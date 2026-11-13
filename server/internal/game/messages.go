@@ -1,6 +1,7 @@
 package game
 
 import (
+	"strconv"
 	"time"
 
 	"orchinizer/protocol"
@@ -16,6 +17,8 @@ func (r *Room) onMessage(c Client, typ string, raw []byte) {
 	}
 
 	switch typ {
+	case protocol.TypeCategories, protocol.TypePick, protocol.TypeLeave, protocol.TypeKick:
+		r.lobbyMessage(c, p, typ, raw)
 	case protocol.TypePattern:
 		r.onPattern(c, p, raw)
 
@@ -42,12 +45,16 @@ func (r *Room) onMessage(c Client, typ string, raw []byte) {
 		r.broadcastPlayers(m)
 
 	case protocol.TypeHostAction:
-		if !isTV {
-			r.reject(c, "only the tv sends host_action")
+		if !isTV && (p == nil || p.seat != r.hostSeat()) {
+			r.reject(c, "Only the host or TV controls the game")
 			return
 		}
 		var m protocol.HostAction
 		if !r.decode(c, raw, &m) {
+			return
+		}
+		if !isTV && m.Action != protocol.HostStart && m.Action != protocol.HostRestart {
+			r.reject(c, "Only the TV skips phases")
 			return
 		}
 		r.onHostAction(c, m.Action)
@@ -82,7 +89,7 @@ func (r *Room) onPattern(c Client, p *player, raw []byte) {
 		r.reject(c, "patterns are locked")
 		return
 	}
-	if p.seat == r.conductor {
+	if r.phase == protocol.PhaseCompose && p.seat == r.conductor {
 		r.reject(c, "the conductor doesn't compose")
 		return
 	}
@@ -90,13 +97,21 @@ func (r *Room) onPattern(c Client, p *player, raw []byte) {
 	if !r.decode(c, raw, &m) {
 		return
 	}
-	if m.Instrument != "" {
-		if !contains(protocol.InstrumentGroups[r.group], m.Instrument) {
-			r.reject(c, "instrument not in this round's group")
+	if m.Instrument != "" && m.Instrument != p.instrument {
+		if r.phase != protocol.PhaseLobby {
+			r.reject(c, "Your instrument is locked for this game")
 			return
 		}
-		p.instrument = m.Instrument
+		if err := r.setPick(p, m.Instrument); err != "" {
+			r.reject(c, err)
+			return
+		}
 	}
+	if p.instrument == "" {
+		r.reject(c, "Pick an instrument first")
+		return
+	}
+
 	p.steps = m.Steps
 	p.noteCount = countNotes(m.Steps)
 	r.broadcastState()
@@ -150,11 +165,26 @@ func (r *Room) onConductor(c Client, p *player, typ string, raw []byte) {
 		if !r.decode(c, raw, &m) {
 			return
 		}
+		if m.ID == "" {
+			r.reject(c, "Cue ID is required")
+			return
+		}
+		if m.Action == protocol.CueAllOut && m.Seat == 0 {
+			for _, q := range r.seatOrder() {
+				if q.seat != r.conductor {
+					cue := protocol.Cue{Envelope: r.env(typ), ID: m.ID + "-" + strconv.Itoa(q.seat), Seat: q.seat, Action: protocol.CueOut}
+					r.pending[cue.ID] = cue
+					r.sendTo(r.tv, cue)
+				}
+			}
+			return
+		}
 		if r.players[m.Seat] == nil || m.Seat == r.conductor || !validAction(m.Action) {
 			r.reject(c, "cue needs a player's seat and action in/out")
 			return
 		}
 		m.Envelope = r.env(typ)
+		r.pending[m.ID] = m
 		out = m
 	case protocol.TypeVolume:
 		var m protocol.Volume
@@ -166,6 +196,8 @@ func (r *Room) onConductor(c Client, p *player, typ string, raw []byte) {
 			return
 		}
 		m.Level = max(0, min(100, m.Level))
+		r.players[m.Seat].level = m.Level
+		r.broadcastState()
 		m.Envelope = r.env(typ)
 		out = m
 	case protocol.TypeCalibrated:
@@ -208,6 +240,11 @@ func (r *Room) onCueScheduled(c Client, raw []byte) {
 		r.reject(c, "cue_scheduled needs an existing seat and action in/out")
 		return
 	}
+	queued, ok := r.pending[m.ID]
+	if !ok || queued.Seat != m.Seat || queued.Action != m.Action {
+		return
+	}
+	delete(r.pending, m.ID)
 	if r.phase == protocol.PhasePerform {
 		r.cueLog = append(r.cueLog, protocol.LoggedCue{ID: m.ID, Seat: m.Seat, Action: m.Action, Beat: m.Beat})
 	}

@@ -105,7 +105,7 @@ func (c *conn) readLoop(ctx context.Context, reg *game.Registry, log *slog.Logge
 		}
 		j.Room = strings.ToUpper(strings.TrimSpace(j.Room)) // judges type "kxqm"
 		switch {
-		case j.Role == protocol.RoleTV && j.Room == "":
+		case (j.Role == protocol.RoleTV || j.Role == protocol.RolePlayer) && j.Room == "" && (j.Role == protocol.RoleTV || strings.TrimSpace(j.Name) != ""):
 			room = reg.Create()
 			if room == nil {
 				c.sendError(protocol.ErrRoomFull, "the server has too many rooms open; try again later")
