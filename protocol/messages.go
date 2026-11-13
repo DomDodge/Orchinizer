@@ -134,12 +134,44 @@ type PlayerState struct {
 
 // PerformanceSummary is one round in the vote and results lists.
 type PerformanceSummary struct {
-	Round         int    `json:"round"`
-	ConductorSeat int    `json:"conductorSeat"`
-	ConductorName string `json:"conductorName"`
-	Key           string `json:"key"`
-	Tempo         int    `json:"tempo"`
-	Votes         int    `json:"votes"`
+	Round         int           `json:"round"`
+	ConductorSeat int           `json:"conductorSeat"`
+	ConductorName string        `json:"conductorName"`
+	Key           string        `json:"key"`
+	Tempo         int           `json:"tempo"`
+	Votes         int           `json:"votes"`
+	Score         *ScoreSummary `json:"score,omitempty"`
+}
+
+type ScoreSummary struct {
+	Points   int `json:"points"`
+	MaxCombo int `json:"maxCombo"`
+	Perfect  int `json:"perfect"`
+	Good     int `json:"good"`
+	Misses   int `json:"misses"`
+	Total    int `json:"total"`
+}
+
+type CueTarget struct {
+	ID     int    `json:"id"`
+	Seat   int    `json:"seat"`
+	Action string `json:"action"`
+	At     int64  `json:"at"`
+	Result string `json:"result"`
+}
+
+type ScoreJudgment struct {
+	TargetID int    `json:"targetId"`
+	Result   string `json:"result"`
+	Points   int    `json:"points"`
+	At       int64  `json:"at"`
+}
+
+type RoundScoring struct {
+	Summary ScoreSummary   `json:"summary"`
+	Combo   int            `json:"combo"`
+	Targets []CueTarget    `json:"targets"`
+	Last    *ScoreJudgment `json:"last,omitempty"`
 }
 
 // State is the full game state. It is broadcast on every change.
@@ -165,6 +197,7 @@ type State struct {
 	Notes        map[int][]Note       `json:"notes,omitempty"` // note-editor parts by seat; seats without notes are left out
 	Live         map[int]int          `json:"live"`
 	Winner       int                  `json:"winner"` // winning round, 0 = none yet
+	Scoring      *RoundScoring        `json:"scoring,omitempty"`
 }
 
 // Pattern: a player's part. Send it on every change during compose.
@@ -275,13 +308,14 @@ type LoggedCue struct {
 
 // Performance is everything the TV needs to replay one round.
 type Performance struct {
-	Round         int         `json:"round"`
-	ConductorSeat int         `json:"conductorSeat"`
-	ConductorName string      `json:"conductorName"`
-	Key           string      `json:"key"`
-	Tempo         int         `json:"tempo"`
-	Parts         []Part      `json:"parts"`
-	Cues          []LoggedCue `json:"cues"`
+	Round         int           `json:"round"`
+	ConductorSeat int           `json:"conductorSeat"`
+	ConductorName string        `json:"conductorName"`
+	Key           string        `json:"key"`
+	Tempo         int           `json:"tempo"`
+	Parts         []Part        `json:"parts"`
+	Cues          []LoggedCue   `json:"cues"`
+	Score         *ScoreSummary `json:"score,omitempty"`
 }
 
 // Performances goes to the TV when the vote starts.

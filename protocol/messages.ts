@@ -72,7 +72,34 @@ export interface PerformanceSummary {
   key: string;
   tempo: number;
   votes: number;
+  score?: ScoreSummary;
 }
+
+export interface ScoreSummary {
+  points: number;
+  maxCombo: number;
+  perfect: number;
+  good: number;
+  misses: number;
+  total: number;
+}
+
+export interface CueTarget {
+  id: number;
+  seat: number;
+  action: CueAction;
+  at: number; // server Unix milliseconds; score the gesture, before TV quantization
+  result: 'pending' | 'perfect' | 'good' | 'miss';
+}
+
+export interface RoundScoring {
+  summary: ScoreSummary;
+  combo: number;
+  targets: CueTarget[];
+  last?: { targetId: number; result: 'perfect' | 'good' | 'miss' | 'early'; points: number; at: number };
+}
+
+export const SCORE_HIT_WINDOW_MS = 300;
 
 /** Full game state, broadcast on every change. */
 export interface State extends Base {
@@ -101,6 +128,7 @@ export interface State extends Base {
   notes?: Record<string, Note[]>;
   live: Record<string, number>;
   winner: number; // winning round, 0 = none
+  scoring?: RoundScoring;
 }
 
 /** A phone using the note editor sends notes; the grid sequencer sends steps. Each message replaces the whole part. */
@@ -193,6 +221,7 @@ export interface Performance {
   tempo: number;
   parts: Part[];
   cues: LoggedCue[];
+  score?: ScoreSummary;
 }
 
 /** To the TV when the vote starts: everything needed for replays. */

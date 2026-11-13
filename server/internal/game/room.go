@@ -101,6 +101,7 @@ type Room struct {
 	cueLog       []protocol.LoggedCue
 	performances []protocol.Performance
 	winner       int
+	scorer       *roundScorer
 }
 
 func newRoom(code string, reg *Registry, log *slog.Logger, t Timings) *Room {
@@ -143,6 +144,8 @@ func (r *Room) post(e event) {
 func (r *Room) run() {
 	idle := time.NewTicker(time.Minute)
 	defer idle.Stop()
+	scoreTick := time.NewTicker(100 * time.Millisecond)
+	defer scoreTick.Stop()
 	lastActive := time.Now()
 	for {
 		var deadline <-chan time.Time
@@ -155,6 +158,10 @@ func (r *Room) run() {
 		case <-deadline:
 			r.timer = nil
 			r.onDeadline()
+		case now := <-scoreTick.C:
+			if r.phase == protocol.PhasePerform && r.scorer != nil && r.scorer.expire(now.UnixMilli()) {
+				r.broadcastState()
+			}
 		case <-idle.C:
 			if r.connectedCount() > 0 {
 				lastActive = time.Now()
@@ -333,6 +340,9 @@ func (r *Room) state() protocol.State {
 		s.Deadline = r.deadline.UnixMilli()
 	}
 	s.ServerTime = time.Now().UnixMilli()
+	if r.phase == protocol.PhasePerform && r.scorer != nil {
+		s.Scoring = &r.scorer.state
+	}
 	for _, p := range r.seatOrder() {
 		s.Patterns[p.seat] = p.steps
 		if len(p.notes) > 0 {

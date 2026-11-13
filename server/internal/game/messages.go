@@ -193,6 +193,9 @@ func (r *Room) onConductor(c Client, p *player, typ string, raw []byte) {
 			return
 		}
 		if m.Action == protocol.CueAllOut && m.Seat == 0 {
+			if !r.scoreCue(m) {
+				return
+			}
 			for _, q := range r.seatOrder() {
 				if q.seat != r.conductor {
 					cue := protocol.Cue{Envelope: r.env(typ), ID: m.ID + "-" + strconv.Itoa(q.seat), Seat: q.seat, Action: protocol.CueOut}
@@ -204,6 +207,9 @@ func (r *Room) onConductor(c Client, p *player, typ string, raw []byte) {
 		}
 		if r.players[m.Seat] == nil || m.Seat == r.conductor || !validAction(m.Action) {
 			r.reject(c, "cue needs a player's seat and action in/out")
+			return
+		}
+		if !r.scoreCue(m) {
 			return
 		}
 		m.Envelope = r.env(typ)
@@ -238,6 +244,17 @@ func (r *Room) onConductor(c Client, p *player, typ string, raw []byte) {
 		r.log.Info("calibrated", "round", r.round)
 		r.startPerform()
 	}
+}
+
+func (r *Room) scoreCue(cue protocol.Cue) bool {
+	if r.phase != protocol.PhasePerform || r.scorer == nil {
+		return true
+	}
+	if !r.scorer.attempt(cue, time.Now().UnixMilli()) {
+		return false
+	}
+	r.broadcastState()
+	return true
 }
 
 func conductorAllowed(phase, typ string) bool {

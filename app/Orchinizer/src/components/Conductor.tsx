@@ -1,12 +1,14 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { createBaton } from '../aim';
 import { clearCalibration, getCalibration } from '../calibration';
-import { send, useSecondsLeft } from '../net';
+import { send, serverNow, useSecondsLeft } from '../net';
 import { motionSupported, onSample } from '../pointer';
 import { instrumentInfo, type Player, type State } from '../protocol';
+import { nextTarget } from '../scoring';
 import { BeatRing } from './Pulse';
+import { ScorePanel } from './ScorePanel';
 import { BG, Btn, FG, H1, P, Screen, Timer } from './ui';
 
 const band = (s: State) => s.players.filter((p) => p.instrument && p.seat !== s.conductor);
@@ -21,15 +23,19 @@ export function Perform({ state }: { state: State }) {
   const [buttons, setButtons] = useState(!motionSupported || directions.length === 0);
   useEffect(() => () => clearCalibration(), []);
   const live = useRef(state.live);
+  const scoring = useRef(state.scoring);
   const sel = useRef(0);
   useEffect(() => {
     live.current = state.live;
-  }, [state.live]);
+    scoring.current = state.scoring;
+  }, [state.live, state.scoring]);
 
   const cue = (seat: number) => {
     if (!seat) return;
-    send({ type: 'cue', id: cueId(), seat, action: live.current[seat] != null ? 'out' : 'in' });
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    const target = nextTarget(scoring.current, serverNow());
+    const action = target?.seat === seat ? target.action : live.current[seat] != null ? 'out' : 'in';
+    send({ type: 'cue', id: cueId(), seat, action });
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
   };
 
   useEffect(() => {
@@ -64,8 +70,10 @@ export function Perform({ state }: { state: State }) {
         <Timer left={left} />
       </Pressable>
 
+      <ScorePanel state={state} />
+
       {buttons ? (
-        <View style={styles.buttons}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.buttons}>
           {players.map((x) => (
             <Pressable
               key={x.seat}
@@ -77,7 +85,7 @@ export function Perform({ state }: { state: State }) {
             </Pressable>
           ))}
           <Btn label="⏹ Everyone stop" color="#FF5252" onPress={() => send({ type: 'cue', id: cueId(), seat: 0, action: 'all_out' })} />
-        </View>
+        </ScrollView>
       ) : (
         // Tapping while pointing cues too, as a fallback for flicks that don't register.
         <Pressable style={styles.stage} onPress={() => cue(sel.current)}>
@@ -103,7 +111,7 @@ export function Perform({ state }: { state: State }) {
           </View>
         ))}
       </View>
-      {!buttons && <P>Flick to cue in/out · tilt for volume · point down and hold to stop all</P>}
+      {!buttons && <P>{state.scoring ? 'Point at the named player, then flick or tap on NOW.' : 'Flick to cue in/out · tilt for volume · point down and hold to stop all'}</P>}
     </Screen>
   );
 }
@@ -113,7 +121,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   headerText: { color: FG, fontSize: 22, fontWeight: '900' },
   stage: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  buttons: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignContent: 'center' },
+  buttons: { flexGrow: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignContent: 'center' },
   cueBtn: { width: '47%', aspectRatio: 1.2, borderWidth: 4, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   cueSeat: { fontSize: 48, fontWeight: '900' },
   cueName: { fontSize: 16, fontWeight: '700' },

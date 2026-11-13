@@ -3,8 +3,9 @@ package protocol
 // Shared game constants. messages.ts mirrors these.
 
 const (
-	MinPlayers = 4 // bots fill the empty seats up to this many
-	MaxPlayers = 8
+	MinPlayers       = 4 // bots fill the empty seats up to this many
+	MaxPlayers       = 8
+	ScoreHitWindowMS = 300
 )
 
 // Categories are presented in this order in every lobby.
