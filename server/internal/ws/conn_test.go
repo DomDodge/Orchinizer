@@ -189,3 +189,56 @@ func TestReconnectAndErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestLobbyDropKeepsSeatAndTVIsProtected(t *testing.T) {
+	url := setup(t)
+	tv := dial(t, url)
+	tv.send(protocol.Join{Envelope: protocol.Envelope{Type: "join"}, Role: "tv"})
+	var tw protocol.Welcome
+	tv.expect("welcome", &tw)
+
+	// A player whose socket drops in the lobby keeps the seat; the token
+	// gets it back without a name.
+	a := dial(t, url)
+	a.send(protocol.Join{Envelope: protocol.Envelope{Type: "join", Room: tw.Room}, Role: "player", Name: "Ada"})
+	var w1 protocol.Welcome
+	a.expect("welcome", &w1)
+	a.ws.CloseNow()
+	var st protocol.State
+	for {
+		tv.expect("state", &st)
+		if len(st.Players) == 1 && !st.Players[0].Connected {
+			break
+		}
+	}
+	a2 := dial(t, url)
+	a2.send(protocol.Join{Envelope: protocol.Envelope{Type: "join", Room: tw.Room}, Role: "player", Token: w1.Token})
+	var w2 protocol.Welcome
+	a2.expect("welcome", &w2)
+	if w2.Seat != w1.Seat {
+		t.Fatalf("seat %d, want %d", w2.Seat, w1.Seat)
+	}
+
+	// A second TV without the token can't take over a live TV.
+	x := dial(t, url)
+	x.send(protocol.Join{Envelope: protocol.Envelope{Type: "join", Room: tw.Room}, Role: "tv"})
+	var e protocol.Error
+	x.expect("error", &e)
+	if e.Code != protocol.ErrNotAllowed {
+		t.Fatalf("error %+v", e)
+	}
+	// With the token it can (e.g. the TV page reloaded in a new tab).
+	y := dial(t, url)
+	y.send(protocol.Join{Envelope: protocol.Envelope{Type: "join", Room: tw.Room}, Role: "tv", Token: tw.Token})
+	var w3 protocol.Welcome
+	y.expect("welcome", &w3)
+
+	// Validation: volume and cue_scheduled for a seat that doesn't exist.
+	a2.send(protocol.Volume{Envelope: protocol.Envelope{Type: "volume"}, Seat: 7, Level: 50})
+	a2.expect("error", &e)
+	y.send(protocol.CueScheduled{Envelope: protocol.Envelope{Type: "cue_scheduled"}, ID: "x", Seat: 1, Action: "sideways", Beat: 1})
+	y.expect("error", &e)
+	if e.Code != protocol.ErrNotAllowed {
+		t.Fatalf("error %+v", e)
+	}
+}

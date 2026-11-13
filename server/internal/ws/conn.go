@@ -105,6 +105,10 @@ func (c *conn) readLoop(ctx context.Context, reg *game.Registry, log *slog.Logge
 		switch {
 		case j.Role == protocol.RoleTV && j.Room == "":
 			room = reg.Create()
+			if room == nil {
+				c.sendError(protocol.ErrRoomFull, "the server has too many rooms open; try again later")
+				return
+			}
 		case j.Room != "":
 			room = reg.Get(j.Room)
 			if room == nil {

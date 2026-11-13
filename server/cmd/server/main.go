@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"orchinizer/server/internal/game"
 	"orchinizer/server/internal/ws"
@@ -26,7 +27,8 @@ func main() {
 		port = "8080"
 	}
 	log.Info("listening", "port", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	srv := &http.Server{Addr: ":" + port, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	if err := srv.ListenAndServe(); err != nil {
 		log.Error("server stopped", "err", err)
 		os.Exit(1)
 	}

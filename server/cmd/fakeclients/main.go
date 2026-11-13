@@ -109,11 +109,8 @@ type bot struct {
 	room  string
 	token string
 	seat  int
-	c     *conn
-
 	mu    sync.Mutex
 	state protocol.State
-	grid  protocol.Grid
 }
 
 // run connects and keeps reconnecting with the token until ctx ends.
@@ -135,13 +132,12 @@ func (b *bot) session(ctx context.Context) error {
 		return err
 	}
 	defer c.ws.CloseNow()
-	b.c = c
 	c.send(protocol.Join{Envelope: env(protocol.TypeJoin, b.room), Role: protocol.RolePlayer, Name: b.name, Token: b.token})
 
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	states := make(chan protocol.State, 16)
-	go b.act(sctx, states)
+	go b.act(sctx, c, states)
 
 	for {
 		_, data, err := c.ws.Read(sctx)
@@ -181,7 +177,7 @@ func (b *bot) session(ctx context.Context) error {
 }
 
 // act reacts to state changes: compose, conduct, vote.
-func (b *bot) act(ctx context.Context, states <-chan protocol.State) {
+func (b *bot) act(ctx context.Context, c *conn, states <-chan protocol.State) {
 	var cancelConduct context.CancelFunc = func() {}
 	defer func() { cancelConduct() }()
 	lastPhase, lastRound, conducting, sentPattern := "", -1, false, false
@@ -212,12 +208,12 @@ func (b *bot) act(ctx context.Context, states <-chan protocol.State) {
 		// Compose: a fresh random pattern each round (and once in the lobby).
 		if s.Conductor != b.seat && (!sentPattern || (phaseChanged && s.Phase == protocol.PhaseCompose)) {
 			sentPattern = true
-			go b.compose(ctx, s.Instruments)
+			go b.compose(ctx, c, s.Instruments)
 		}
 
 		// Calibrate: pretend to point at each seat, then report.
 		if phaseChanged && s.Phase == protocol.PhaseCalibrate && s.Conductor == b.seat {
-			go b.calibrate(ctx, s)
+			go b.calibrate(ctx, c, s)
 		}
 
 		// Conduct while performing (or in the lobby when no conductor is set).
@@ -226,7 +222,7 @@ func (b *bot) act(ctx context.Context, states <-chan protocol.State) {
 			conducting = true
 			cctx, cc := context.WithCancel(ctx)
 			cancelConduct = cc
-			go b.conduct(cctx)
+			go b.conduct(cctx, c)
 			log.Printf("[%s] conducting", b.name)
 		} else if !shouldConduct && conducting {
 			conducting = false
@@ -245,7 +241,7 @@ func (b *bot) act(ctx context.Context, states <-chan protocol.State) {
 				voted[s.Round] = true
 				go func(r int) {
 					sleep(ctx, time.Duration(1000+rand.IntN(5000))*time.Millisecond)
-					b.c.send(protocol.Vote{Envelope: env(protocol.TypeVote, b.room), Round: r})
+					c.send(protocol.Vote{Envelope: env(protocol.TypeVote, b.room), Round: r})
 				}(options[rand.IntN(len(options))])
 			}
 		}
@@ -253,20 +249,20 @@ func (b *bot) act(ctx context.Context, states <-chan protocol.State) {
 }
 
 // compose sends a random pattern, then tweaks it a few times like a person would.
-func (b *bot) compose(ctx context.Context, instruments []string) {
+func (b *bot) compose(ctx context.Context, c *conn, instruments []string) {
 	inst := ""
 	if len(instruments) > 0 && rand.IntN(3) == 0 {
 		inst = instruments[rand.IntN(len(instruments))] // sometimes re-pick
 	}
 	g := randomGrid()
-	b.c.send(protocol.Pattern{Envelope: env(protocol.TypePattern, b.room), Instrument: inst, Steps: g})
+	c.send(protocol.Pattern{Envelope: env(protocol.TypePattern, b.room), Instrument: inst, Steps: g})
 	for range 3 + rand.IntN(4) {
 		if !sleep(ctx, time.Duration(1500+rand.IntN(4000))*time.Millisecond) {
 			return
 		}
 		r, st := rand.IntN(protocol.Rows), rand.IntN(protocol.Steps)
 		g[r][st] = !g[r][st]
-		b.c.send(protocol.Pattern{Envelope: env(protocol.TypePattern, b.room), Instrument: inst, Steps: g})
+		c.send(protocol.Pattern{Envelope: env(protocol.TypePattern, b.room), Instrument: inst, Steps: g})
 	}
 }
 
@@ -280,7 +276,7 @@ func randomGrid() protocol.Grid {
 	return g
 }
 
-func (b *bot) calibrate(ctx context.Context, s protocol.State) {
+func (b *bot) calibrate(ctx context.Context, c *conn, s protocol.State) {
 	angles := map[int]float64{}
 	i := 0
 	for _, p := range s.Players {
@@ -291,15 +287,15 @@ func (b *bot) calibrate(ctx context.Context, s protocol.State) {
 			return
 		}
 		angles[p.Seat] = float64(i)*25 + rand.Float64()*4 - 2
-		b.c.send(protocol.Select{Envelope: env(protocol.TypeSelect, b.room), Seat: p.Seat})
+		c.send(protocol.Select{Envelope: env(protocol.TypeSelect, b.room), Seat: p.Seat})
 		i++
 	}
-	b.c.send(protocol.Calibrated{Envelope: env(protocol.TypeCalibrated, b.room), Angles: angles})
+	c.send(protocol.Calibrated{Envelope: env(protocol.TypeCalibrated, b.room), Angles: angles})
 	log.Printf("[%s] calibrated %d seats", b.name, len(angles))
 }
 
 // conduct sweeps select across seats, cues random parts in and out, and rides volume.
-func (b *bot) conduct(ctx context.Context) {
+func (b *bot) conduct(ctx context.Context, c *conn) {
 	in := map[int]bool{}
 	cueN := 0
 	selectT := time.NewTicker(200 * time.Millisecond) // 5/s, under the 10/s cap
@@ -311,7 +307,7 @@ func (b *bot) conduct(ctx context.Context) {
 			return
 		case <-selectT.C:
 			if seats := b.otherSeats(); len(seats) > 0 {
-				b.c.send(protocol.Select{Envelope: env(protocol.TypeSelect, b.room), Seat: seats[rand.IntN(len(seats))]})
+				c.send(protocol.Select{Envelope: env(protocol.TypeSelect, b.room), Seat: seats[rand.IntN(len(seats))]})
 			}
 		case <-nextCue:
 			nextCue = time.After(time.Duration(1000+rand.IntN(2500)) * time.Millisecond)
@@ -326,9 +322,9 @@ func (b *bot) conduct(ctx context.Context) {
 			}
 			in[seat] = !in[seat]
 			cueN++
-			b.c.send(protocol.Cue{Envelope: env(protocol.TypeCue, b.room), ID: fmt.Sprintf("s%d-c%d", b.seat, cueN), Seat: seat, Action: action})
+			c.send(protocol.Cue{Envelope: env(protocol.TypeCue, b.room), ID: fmt.Sprintf("s%d-c%d", b.seat, cueN), Seat: seat, Action: action})
 			if rand.IntN(3) == 0 {
-				b.c.send(protocol.Volume{Envelope: env(protocol.TypeVolume, b.room), Seat: seat, Level: 40 + rand.IntN(61)})
+				c.send(protocol.Volume{Envelope: env(protocol.TypeVolume, b.room), Seat: seat, Level: 40 + rand.IntN(61)})
 			}
 			if !*quiet {
 				log.Printf("[%s] cue %s seat %d", b.name, action, seat)

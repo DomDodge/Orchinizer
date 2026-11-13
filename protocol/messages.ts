@@ -49,7 +49,7 @@ export interface PlayerState {
   seat: number; // 1-based
   name: string;
   color: string; // "#rrggbb"
-  instrument: string; // "" in the lobby
+  instrument: string; // dealt at join; a pattern message can change it
   connected: boolean;
   bot: boolean;
   noteCount: number;

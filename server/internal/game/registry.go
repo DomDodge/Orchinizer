@@ -8,6 +8,10 @@ import (
 	"orchinizer/protocol"
 )
 
+// MaxRooms caps how many rooms exist at once, so nobody can exhaust the
+// server by opening TV sockets in a loop.
+const MaxRooms = 200
+
 // Registry maps room codes to rooms. It is the only state shared between
 // goroutines, so it is the only thing behind a mutex.
 type Registry struct {
@@ -20,10 +24,15 @@ func NewRegistry(log *slog.Logger) *Registry {
 	return &Registry{rooms: map[string]*Room{}, log: log}
 }
 
-// Create starts a new room with a unique code.
+// Create starts a new room with a unique code, or returns nil if the
+// server is at MaxRooms.
 func (r *Registry) Create() *Room {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if len(r.rooms) >= MaxRooms {
+		r.log.Warn("room limit reached", "rooms", len(r.rooms))
+		return nil
+	}
 	var code string
 	for {
 		b := make([]byte, protocol.RoomCodeLength)

@@ -112,7 +112,7 @@ type PlayerState struct {
 	Seat       int    `json:"seat"` // 1-based
 	Name       string `json:"name"`
 	Color      string `json:"color"`
-	Instrument string `json:"instrument"` // empty in the lobby
+	Instrument string `json:"instrument"` // dealt at join; a pattern message can change it
 	Connected  bool   `json:"connected"`
 	Bot        bool   `json:"bot"`
 	NoteCount  int    `json:"noteCount"` // for the TV's compose tiles

@@ -12,6 +12,8 @@
 - Every message is a JSON text frame: `{"type": "...", "room": "KXQM", ...}`.
 - The first message must be `join`. Anything sent before it gets an `error` and the socket is closed.
 - Save the `token` from `welcome`. To reconnect, send `join` again with the same `room` and `token` to get your seat back. The server then sends `welcome` and the full `state`.
+- A player who disconnects keeps their seat, even in the lobby (phones drop whenever a screen locks). Seats still disconnected when the host starts are removed.
+- **TV:** store the token in `localStorage`. A TV `join` for an existing room is accepted with that token, or by anyone while no TV is connected, so a phone can't kick a live TV.
 
 ## Agreed constants
 

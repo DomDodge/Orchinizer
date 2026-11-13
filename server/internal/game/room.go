@@ -151,8 +151,14 @@ func (r *Room) handle(e event) {
 func (r *Room) onJoin(c Client, j protocol.Join) {
 	switch j.Role {
 	case protocol.RoleTV:
-		// A TV join always takes the TV slot. That way a refreshed browser
-		// that lost its token can still get back in.
+		// The TV slot can be taken with the TV's token, or by anyone while no
+		// TV is connected (a refreshed browser that lost its token). A phone
+		// can't kick a live TV.
+		hasToken := j.Token != "" && j.Token == r.tvToken
+		if r.tv != nil && r.tv != c && !hasToken {
+			r.fail(c, protocol.ErrNotAllowed, "this room already has a TV")
+			return
+		}
 		if r.tv != nil && r.tv != c {
 			r.tv.Close()
 		}
@@ -182,13 +188,24 @@ func (r *Room) onJoin(c Client, j protocol.Join) {
 		}
 		name := strings.TrimSpace(j.Name)
 		if name == "" {
-			r.fail(c, protocol.ErrBadMessage, "name is required")
+			msg := "name is required"
+			if j.Token != "" {
+				msg = "unknown token; join again with a name"
+			}
+			r.fail(c, protocol.ErrBadMessage, msg)
 			return
 		}
 		if len([]rune(name)) > 16 {
 			name = string([]rune(name)[:16])
 		}
 		seat := r.freeSeat()
+		if seat == 0 {
+			// Full: give the seat of someone who left the lobby to the newcomer.
+			if p := r.firstDisconnected(); p != nil {
+				delete(r.players, p.seat)
+				seat = p.seat
+			}
+		}
 		if seat == 0 {
 			r.fail(c, protocol.ErrRoomFull, "the room is full")
 			return
@@ -229,15 +246,11 @@ func (r *Room) onLeave(c Client) {
 	if p == nil {
 		return
 	}
-	if r.phase == protocol.PhaseLobby {
-		// In the lobby, leaving gives up the seat.
-		delete(r.players, p.seat)
-		r.log.Info("player left", "seat", p.seat, "name", p.name)
-	} else {
-		// Mid-game the seat and pattern stay; the token gets them back.
-		p.client = nil
-		r.log.Info("player disconnected", "seat", p.seat, "name", p.name)
-	}
+	// The seat (and pattern) stay so the token can take them back: phones
+	// drop whenever a screen locks. Seats still disconnected when the host
+	// starts are removed then.
+	p.client = nil
+	r.log.Info("player disconnected", "seat", p.seat, "name", p.name, "phase", r.phase)
 	r.broadcastState()
 }
 
@@ -292,11 +305,13 @@ func (r *Room) onMessage(c Client, typ string, raw []byte) {
 		if !r.decode(c, raw, &m) {
 			return
 		}
-		r.cueLog = append(r.cueLog, protocol.LoggedCue{ID: m.ID, Seat: m.Seat, Action: m.Action, Beat: m.Beat})
-		if t := r.players[m.Seat]; t != nil {
-			t.playing = m.Action == protocol.CueIn
-			r.broadcastState()
+		if r.players[m.Seat] == nil || !validAction(m.Action) {
+			r.reject(c, "cue_scheduled needs an existing seat and action in/out")
+			return
 		}
+		r.cueLog = append(r.cueLog, protocol.LoggedCue{ID: m.ID, Seat: m.Seat, Action: m.Action, Beat: m.Beat})
+		r.players[m.Seat].playing = m.Action == protocol.CueIn
+		r.broadcastState()
 
 	case protocol.TypeBar:
 		if !isTV {
@@ -356,7 +371,7 @@ func (r *Room) relayConductor(c Client, typ string, raw []byte) {
 		if !r.decode(c, raw, &m) {
 			return
 		}
-		if r.players[m.Seat] == nil || (m.Action != protocol.CueIn && m.Action != protocol.CueOut) {
+		if r.players[m.Seat] == nil || !validAction(m.Action) {
 			r.reject(c, "cue needs an existing seat and action in/out")
 			return
 		}
@@ -364,6 +379,10 @@ func (r *Room) relayConductor(c Client, typ string, raw []byte) {
 	case protocol.TypeVolume:
 		var m protocol.Volume
 		if !r.decode(c, raw, &m) {
+			return
+		}
+		if r.players[m.Seat] == nil {
+			r.reject(c, "no such seat")
 			return
 		}
 		m.Level = max(0, min(100, m.Level))
@@ -500,6 +519,26 @@ func (r *Room) freeSeat() int {
 	return 0
 }
 
+// firstDisconnected returns the lowest disconnected human seat, or nil.
+func (r *Room) firstDisconnected() *player {
+	for _, p := range r.seatOrder() {
+		if !p.bot && p.client == nil {
+			return p
+		}
+	}
+	return nil
+}
+
+// removeDisconnected drops every disconnected human seat. Called when the
+// host starts the game.
+func (r *Room) removeDisconnected() {
+	for seat, p := range r.players {
+		if !p.bot && p.client == nil {
+			delete(r.players, seat)
+		}
+	}
+}
+
 func (r *Room) playerByToken(tok string) *player {
 	if tok == "" {
 		return nil
@@ -545,6 +584,8 @@ func countNotes(g protocol.Grid) int {
 	}
 	return n
 }
+
+func validAction(a string) bool { return a == protocol.CueIn || a == protocol.CueOut }
 
 func contains(list []string, s string) bool {
 	for _, x := range list {
