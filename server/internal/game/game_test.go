@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"orchinizer/protocol"
 )
@@ -51,8 +52,9 @@ func (f *fakeClient) lastError() string {
 // The room is driven synchronously: handle() and onDeadline() run on the
 // test goroutine, the same way run() would call them.
 func newTestRoom() *Room {
-	r := newRoom("TEST", nil, slog.New(slog.NewTextHandler(io.Discard, nil)), DefaultTimings)
-	return r
+	t := DefaultTimings
+	t.ReplayClip = 0 // most tests check that the vote ends as soon as everyone votes
+	return newRoom("TEST", nil, slog.New(slog.NewTextHandler(io.Discard, nil)), t)
 }
 
 func send(r *Room, c Client, v any) {
@@ -342,5 +344,36 @@ func TestSelectRateLimit(t *testing.T) {
 	var cue protocol.Cue
 	if !tv.last(protocol.TypeCue, &cue) || cue.ID != "2" {
 		t.Fatalf("second cue dropped: %+v", cue)
+	}
+}
+
+// With replays on, everyone voting early pulls the deadline in to the end of
+// the replays instead of cutting them off.
+func TestVoteWaitsForReplays(t *testing.T) {
+	r := newTestRoom()
+	r.timings.ReplayClip = 10 * time.Second
+	r.timings.Vote = 5 * time.Second
+	tv := joinTV(r)
+	a, b := joinPlayer(r, "A"), joinPlayer(r, "B")
+	host(r, tv, protocol.HostStart)
+	for range 6 { // 2 rounds: compose, calibrate, perform each
+		r.onDeadline()
+	}
+	s := tv.state(t)
+	if s.Phase != protocol.PhaseVote {
+		t.Fatalf("phase %s", s.Phase)
+	}
+	// 2 replays x 10 s + 5 s pad = 25 s, longer than the 5 s vote.
+	if left := time.Until(time.UnixMilli(s.Deadline)); left < 24*time.Second || left > 26*time.Second {
+		t.Fatalf("vote deadline in %v, want ~25s", left)
+	}
+	send(r, a, protocol.Vote{Envelope: protocol.Envelope{Type: protocol.TypeVote}, Round: 2})
+	send(r, b, protocol.Vote{Envelope: protocol.Envelope{Type: protocol.TypeVote}, Round: 1})
+	if tv.state(t).Phase != protocol.PhaseVote {
+		t.Fatal("vote ended before the replays finished")
+	}
+	r.onDeadline()
+	if tv.state(t).Phase != protocol.PhaseResults {
+		t.Fatal("no results after the replays")
 	}
 }

@@ -73,9 +73,11 @@ type Room struct {
 	tvToken string
 	players map[int]*player // by seat
 
-	phase      string
-	deadline   time.Time
-	timer      *time.Timer // fires at deadline; nil when the phase has none
+	phase    string
+	deadline time.Time
+	timer    *time.Timer // fires at deadline; nil when the phase has none
+	// voteMinEnd: the vote doesn't end early before the TV's replays finish.
+	voteMinEnd time.Time
 	key        string
 	tempo      int
 	categories []string
