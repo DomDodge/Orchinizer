@@ -1,56 +1,31 @@
-# Welcome to your Expo app 👋
+# Orchinizer phone frontend
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Expo SDK 58 / React Native screens for players and conductors: host/join, lobby and instrument selection, compose, calibration, performance, voting, and results. Includes motion controls, haptics, and the audio assets used for note previews.
 
-## Get started
+Run from `app/Orchinizer/`:
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **src/app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```sh
+npm ci
+EXPO_PUBLIC_SERVER_URL=wss://YOUR_HOST/ws npm start
 ```
 
-This command will move the starter code to the **example** directory and create a blank **src/app** directory where you can start developing.
+Set the WebSocket URL to a server the phones can reach. For a local server, use the laptop's LAN address instead of `localhost`. The app reports an error if no server URL is configured.
 
-### Other setup steps
+The phone imports the shared TypeScript contract from `../../protocol/messages.ts`. The Go server must run the matching revision. From the repository root, start it in another terminal with `cd server && go run ./cmd/server`.
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+1. Host a room on a phone; other players join with its code and choose names.
+2. The host enables sections. Everyone chooses a unique instrument, including the host for later rounds.
+3. Connect the TV client to that room (`join` with `role: "tv"` and the room code). The TV owns audio scheduling; its UI is maintained separately.
+4. Once the TV is attached and everyone has picked, tap **Start game** on the host phone. Bots fill up to four seats for small test groups.
+5. Compose, calibrate, perform, and vote. The host can tap **Back to lobby** after results.
 
-## Learn more
+Disconnected phones retain their seat and part using the server's reconnect token for the current app session. **Leave** or a host kick frees the seat and instrument. A removed offline client stops reconnecting when its token is rejected. Reloading the app starts a new session.
 
-To learn more about developing your project with Expo, look at the following resources:
+Frontend checks:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```sh
+npm test
+npm run test:integration  # requires Go 1.27; local server + actual phone network module + simulated TV
+npx tsc --noEmit
+npm run lint
+```
