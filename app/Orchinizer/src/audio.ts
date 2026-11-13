@@ -83,8 +83,9 @@ export function playNote(instrument: string, key: string, row: number) {
     stops.delete(s.id);
   }
   const p = player(s);
-  p.shouldCorrectPitch = false;
-  p.playbackRate = s.rate;
+  // Don't set p.playbackRate: on iOS (Expo Go, SDK 58) setting a non-integer rate hangs the app,
+  // which froze the compose screen on the first note. Previews play the nearest sample below the
+  // note at its recorded pitch (up to SAMPLE_STEP - 1 semitones flat); the TV plays the real thing.
   p.seekTo(0);
   p.play();
 }
