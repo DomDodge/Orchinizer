@@ -1,6 +1,7 @@
 // Piano-roll note editor: pitch runs up, time runs across, a note is a bar whose width is its length.
 // All the rules live in notes.ts; this file only turns touches into calls to it.
-// Touch handling is plain React Native: Pressable for taps on the grid, responder props for dragging notes.
+// Touch handling is plain React Native: one Pressable per grid cell for taps (so no tap coordinates are
+// needed, which differ by platform), responder props for dragging notes.
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { type GestureResponderEvent, type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -50,12 +51,9 @@ export function NoteEditor({ notes, onChange, color, keyName, disabled = false, 
     if (next !== notes) onChange(next);
   };
 
-  // Taps land on the grid itself: the background has pointerEvents="none", so locationX/Y are grid coordinates.
-  const onTap = (e: GestureResponderEvent) => {
-    if (disabled || width === 0) return;
-    const { locationX, locationY } = e.nativeEvent;
-    const start = offset + Math.floor(locationX / cellW);
-    const row = rows - 1 - Math.floor(locationY / ROW_H); // top row = highest note
+  // A tap on an empty cell adds a note there. Notes are drawn on top of the cells, so they get their own touches.
+  const addNote = (row: number, start: number) => {
+    if (disabled) return;
     if (full) return void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     const next = place(notes, row, start, newId());
     if (!next) return;
@@ -86,18 +84,18 @@ export function NoteEditor({ notes, onChange, color, keyName, disabled = false, 
           ))}
         </View>
 
-        <Pressable
-          onPress={onTap}
-          disabled={disabled}
-          style={[styles.grid, { height: ROW_H * rows }]}
-          onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}
-        >
-          {/* Background: rows, with every beat shaded so notes are easy to line up. */}
-          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <View style={[styles.grid, { height: ROW_H * rows }]} onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
+          {/* The cells: rows top (highest note) to bottom, every beat shaded so notes are easy to line up. */}
+          <View style={StyleSheet.absoluteFill}>
             {Array.from({ length: rows }, (_, i) => (
               <View key={i} style={[styles.row, i % 2 === 1 && styles.rowAlt]}>
                 {Array.from({ length: BAR_STEPS }, (_, s) => (
-                  <View key={s} style={[styles.step, s % STEPS_PER_BEAT === 0 && styles.beat]} />
+                  <Pressable
+                    key={s}
+                    disabled={disabled}
+                    onPress={() => addNote(rows - 1 - i, offset + s)}
+                    style={[styles.step, s % STEPS_PER_BEAT === 0 && styles.beat]}
+                  />
                 ))}
               </View>
             ))}
@@ -122,7 +120,7 @@ export function NoteEditor({ notes, onChange, color, keyName, disabled = false, 
           {width > 0 && playhead >= offset && playhead < offset + BAR_STEPS && (
             <View pointerEvents="none" style={[styles.playhead, { left: (playhead - offset) * cellW }]} />
           )}
-        </Pressable>
+        </View>
       </View>
 
       <Text style={styles.hint}>Tap to add · drag to move · drag the right edge to stretch · hold to delete</Text>
