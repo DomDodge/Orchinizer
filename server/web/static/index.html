@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phone Orchestra server</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; background: #111; color: #eee; max-width: 720px; margin: 40px auto; padding: 0 16px; }
+  pre { background: #222; padding: 12px; overflow-x: auto; font-size: 13px; }
+  button, input { font: inherit; padding: 4px 10px; }
+</style>
+</head>
+<body>
+<h1>Phone Orchestra server</h1>
+<p>This is a placeholder. The real TV page from <code>/tv</code> replaces it in the Docker build.</p>
+<p>Debug TV: <button id="go">Create room</button> <input id="msg" size="50" placeholder='{"type":"host_action","action":"start"}'> <button id="send">Send</button></p>
+<pre id="log"></pre>
+<script>
+  const log = (s) => { const el = document.getElementById("log"); el.textContent = s + "\n" + el.textContent; };
+  let ws;
+  document.getElementById("go").onclick = () => {
+    ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+    ws.onopen = () => ws.send(JSON.stringify({ type: "join", role: "tv" }));
+    ws.onmessage = (e) => log("← " + e.data);
+    ws.onclose = () => log("closed");
+  };
+  document.getElementById("send").onclick = () => {
+    const v = document.getElementById("msg").value; ws && ws.send(v); log("→ " + v);
+  };
+</script>
+</body>
+</html>

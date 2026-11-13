@@ -1,0 +1,7 @@
+# Docker build context is the repo root; only send what the build needs.
+*
+!protocol/
+!server/
+!tv/
+tv/node_modules/
+tv/dist/
