@@ -1,91 +1,25 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { angleDiff, createBaton, type Calib } from '../aim';
+import { createBaton } from '../aim';
+import { clearCalibration, getCalibration } from '../calibration';
 import { send, useSecondsLeft } from '../net';
-import { currentHeading, motionSupported, onSample, startMotion } from '../pointer';
+import { motionSupported, onSample } from '../pointer';
 import { instrumentInfo, type Player, type State } from '../protocol';
 import { BeatRing } from './Pulse';
 import { BG, Btn, FG, H1, P, Screen, Timer } from './ui';
 
-// Calibrate hands this to Perform. Reset every round.
-let calib: Calib = [];
 const band = (s: State) => s.players.filter((p) => p.instrument && p.seat !== s.conductor);
 let cueN = 0;
 const cueId = () => `${Date.now().toString(36)}-${cueN++}`;
-
-/** Calibrate phase for the conductor: a 3 s handoff, then "point at seat N and tap" for each seat. */
-export function Calibrate({ state }: { state: State }) {
-  const [handoff, setHandoff] = useState(3);
-  const [raw, setRaw] = useState<number[]>([]);
-  const seats = band(state);
-  const target = seats[raw.length];
-
-  useEffect(() => {
-    calib = [];
-    startMotion(); // warm the sensor before the first tap
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const id = setInterval(() => setHandoff((n) => Math.max(0, n - 1)), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const finish = (headings: number[]) => {
-    calib = seats.map((p, i) => ({ seat: p.seat, angle: angleDiff(headings[i], headings[0]) }));
-    send({ type: 'calibrated', angles: Object.fromEntries(calib.map((c) => [c.seat, Math.round(c.angle)])) });
-  };
-
-  const tap = () => {
-    const next = [...raw, currentHeading()];
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setRaw(next);
-    if (next.length === seats.length) finish(next);
-  };
-
-  if (handoff > 0)
-    return (
-      <Screen bg="#6C63FF" style={{ justifyContent: 'center' }}>
-        <H1>You&apos;re conducting!</H1>
-        <Text style={styles.huge}>{handoff}</Text>
-      </Screen>
-    );
-
-  if (!motionSupported)
-    return (
-      <Screen style={{ justifyContent: 'center' }}>
-        <H1>No motion sensors here</H1>
-        <P>You&apos;ll conduct with on-screen buttons.</P>
-        <Btn label="Start performing" onPress={() => send({ type: 'calibrated', angles: {} })} />
-      </Screen>
-    );
-
-  if (!target)
-    return (
-      <Screen style={{ justifyContent: 'center' }}>
-        <H1>Calibrated ✓</H1>
-        <P>Starting the performance…</P>
-      </Screen>
-    );
-
-  return (
-    <Pressable style={{ flex: 1 }} onPress={tap}>
-      <Screen bg={target.color + '22'} style={{ justifyContent: 'center', alignItems: 'center' }}>
-        <P color={FG}>
-          Point at seat {raw.length + 1} of {seats.length}
-        </P>
-        <Text style={[styles.huge, { color: target.color }]}>{target.seat}</Text>
-        <H1 color={target.color}>{target.name}</H1>
-        <P>…then tap anywhere</P>
-        {raw.length > 0 && <Btn label="Redo" color="#333" onPress={() => setRaw([])} />}
-      </Screen>
-    </Pressable>
-  );
-}
 
 /** Perform phase: point + flick to toggle parts, tilt for volume, point down and hold for the big finish. */
 export function Perform({ state }: { state: State }) {
   const left = useSecondsLeft(state.deadline);
   const [selected, setSelected] = useState(0);
-  const [buttons, setButtons] = useState(!motionSupported || calib.length === 0);
+  const [directions] = useState(() => getCalibration(state));
+  const [buttons, setButtons] = useState(!motionSupported || directions.length === 0);
+  useEffect(() => () => clearCalibration(), []);
   const live = useRef(state.live);
   const sel = useRef(0);
   useEffect(() => {
@@ -100,7 +34,7 @@ export function Perform({ state }: { state: State }) {
 
   useEffect(() => {
     if (buttons) return;
-    const baton = createBaton(calib);
+    const baton = createBaton(directions);
     return onSample((s) => {
       for (const e of baton.update(s)) {
         if (e.type === 'select') {
@@ -116,7 +50,7 @@ export function Perform({ state }: { state: State }) {
         }
       }
     });
-  }, [buttons]);
+  }, [buttons, directions]);
 
   const players = band(state);
   const p = players.find((x) => x.seat === selected);

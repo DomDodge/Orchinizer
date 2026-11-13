@@ -8,6 +8,7 @@ import type { Sample } from './aim';
 const DEG = 180 / Math.PI;
 let heading = 0; // degrees, increases turning right
 let subscribed = false;
+let starting: Promise<boolean> | null = null;
 type Listener = (s: Sample, raw: DeviceMotionMeasurement) => void;
 const listeners = new Set<Listener>();
 
@@ -29,14 +30,24 @@ function onMotion(raw: DeviceMotionMeasurement) {
 export const motionSupported = Platform.OS !== 'web';
 
 /** Start the sensor. It stays on so heading never loses track between calibrate and perform. */
-export function startMotion() {
-  if (subscribed || !motionSupported) return;
-  subscribed = true;
-  DeviceMotion.requestPermissionsAsync().then(({ granted }) => {
-    if (!granted) return void (subscribed = false);
-    DeviceMotion.setUpdateInterval(16);
-    DeviceMotion.addListener(onMotion);
-  });
+export function startMotion(): Promise<boolean> {
+  if (!motionSupported) return Promise.resolve(false);
+  if (subscribed) return Promise.resolve(true);
+  if (starting) return starting;
+  starting = (async () => {
+    try {
+      if (!await DeviceMotion.isAvailableAsync()) return false;
+      const { granted } = await DeviceMotion.requestPermissionsAsync();
+      if (!granted) return false;
+      DeviceMotion.setUpdateInterval(16);
+      DeviceMotion.addListener(onMotion);
+      subscribed = true;
+      return true;
+    } catch {
+      return false; // the calibration screen offers button controls instead
+    }
+  })().finally(() => { starting = null; });
+  return starting;
 }
 
 /** Subscribe to ~60 Hz samples (raw reading included for debugging). */

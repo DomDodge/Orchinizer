@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 import { send, useSecondsLeft, useNet } from '../net';
 import { instrumentInfo, type Player, type State } from '../protocol';
 import { BeatRing } from './Pulse';
@@ -9,11 +9,18 @@ import { BG, Btn, DIM, FG, H1, P, Screen, SeatBadge, Timer } from './ui';
 /** Everyone except the conductor during calibrate: show the seat number big so the conductor can find you. */
 export function HoldUp({ state, me }: { state: State; me: Player }) {
   const conductor = state.players.find((p) => p.seat === state.conductor);
+  const left = useSecondsLeft(state.deadline);
   return (
-    <Screen bg={me.color + '22'} style={{ justifyContent: 'center' }}>
-      <P color={FG}>Hold your phone up — {conductor?.name ?? 'the conductor'} is calibrating</P>
-      <SeatBadge seat={me.seat} color={me.color} size={240} />
-      <H1 color={me.color}>{me.name}</H1>
+    <Screen bg={me.color + '22'}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', gap: 14, paddingVertical: 12 }}>
+        <P color={FG}>ORCHESTRA SETUP · ROUND {state.round}</P>
+        <Timer left={left} />
+        <P>Hold your phone up so {conductor?.name ?? 'the conductor'} can find you.</P>
+        <SeatBadge seat={me.seat} color={me.color} size={180} />
+        <H1 color={me.color}>{me.name}</H1>
+        <P color={FG}>{instrumentInfo(me.instrument).emoji} {instrumentInfo(me.instrument).label}</P>
+        <P>Stay in the same spot until the performance ends.</P>
+      </ScrollView>
     </Screen>
   );
 }
