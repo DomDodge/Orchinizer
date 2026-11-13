@@ -7,8 +7,7 @@
 //   { tick, beat, seat, type: 'volume', level }
 // Patterns + events are enough to replay a performance exactly.
 import * as Tone from 'tone'
-import { markRaw } from 'vue'
-import { store, on } from '../state/store.js'
+import * as store from '../state/store.js'
 import { send } from '../net/socket.js'
 import * as instruments from './instruments.js' // only via play / setVolume / dispose
 
@@ -25,14 +24,14 @@ let voices = {} // seat -> { inst, part }
 // Must be called from a click handler.
 export function unlock() {
   return Tone.start().then(() => {
-    master = new Tone.Gain(store.muted ? 0 : 1)
+    master = new Tone.Gain(store.getState().muted ? 0 : 1)
     master.chain(new Tone.Limiter(-1), Tone.getDestination())
   })
 }
 
 // Silences output without touching the Transport, so cues, bars and visuals keep running.
 export function setMuted(muted) {
-  store.muted = muted
+  store.setMuted(muted)
   master?.gain.rampTo(muted ? 0 : 1, 0.05)
 }
 
@@ -41,6 +40,21 @@ export function setMuted(muted) {
 function nextBeatTick() {
   const committed = T.getTicksAtTime(Tone.now() + 0.06)
   return (Math.floor(committed / T.PPQ) + 1) * T.PPQ
+}
+
+// For visuals that move continuously (falling notes): the Transport position of what's
+// being heard right now. Reading the audio clock each frame keeps them locked to the sound.
+export function timeline() {
+  return {
+    running: !!perf && T.state === 'started',
+    tick: T.getTicksAtTime(Tone.immediate()),
+    ppq: T.PPQ,
+  }
+}
+
+// Whether a seat's part is (or, for already-scheduled cues, will be) playing at `tick`.
+export function seatOn(seat, tick) {
+  return !!perf && isOn(seat, tick)
 }
 
 function isOn(seat, tick) {
@@ -67,11 +81,10 @@ function scheduleEvent(e) {
     }
     Draw.schedule(() => {
       if (e.type === 'cue') {
-        store.playing[e.seat] = e.action === 'in'
-        store.lastCue = { seat: e.seat, action: e.action, beat: e.beat }
+        store.setCue(e.seat, e.action, e.beat)
         console.log(`[audio] cue #${e.id} seat ${e.seat} ${e.action} landed on beat ${e.beat}`)
       } else {
-        store.volumes[e.seat] = e.level
+        store.setVolume(e.seat, e.level)
       }
     }, time)
   }, `${e.tick}i`)
@@ -97,6 +110,7 @@ function load(p) {
     const part = new Tone.Part((time, ev) => {
       if (!isOn(pl.seat, Math.round(T.getTicksAtTime(time)))) return
       ev.rows.forEach((row) => inst.play(row, time))
+      Draw.schedule(() => store.bumpHit(pl.seat), time)
     }, steps)
     part.loop = true
     part.loopEnd = '1m'
@@ -108,11 +122,8 @@ function load(p) {
   T.scheduleRepeat((time) => {
     const beat = Math.round(T.getTicksAtTime(time) / T.PPQ)
     Draw.schedule(() => {
-      store.beat = beat
-      if (beat % 4 === 0) {
-        store.bar = beat / 4
-        if (live) send('bar', { bar: store.bar, tempo: perf.tempo })
-      }
+      store.setBeat(beat)
+      if (beat % 4 === 0 && live) send('bar', { bar: beat / 4, tempo: perf.tempo })
     }, time)
   }, '4n', 0)
 
@@ -124,9 +135,7 @@ function teardown() {
   T.cancel(0)
   Object.values(voices).forEach((v) => (v.part.dispose(), v.inst.dispose()))
   voices = {}
-  store.playing = {}
-  store.beat = -1
-  store.bar = -1
+  store.resetPlayback()
 }
 
 function startLive(state) {
@@ -140,7 +149,7 @@ function startLive(state) {
     events: [],
     endTick: null,
   }
-  store.performances[p.round] = markRaw(p)
+  store.savePerformance(p)
   live = true
   load(p)
   T.start('+0.1')
@@ -152,13 +161,13 @@ function stopLive() {
   teardown()
 }
 
-on('state', (s) => {
+store.on('state', (s) => {
   if (!master) return
   if (s.phase === 'perform' && !live) startLive(s)
   else if (s.phase !== 'perform' && live) stopLive()
 })
 
-on('cue', (msg) => {
+store.on('cue', (msg) => {
   if (!live || !voices[msg.seat]) return
   const tick = nextBeatTick()
   const e = { tick, beat: tick / T.PPQ, seat: msg.seat, type: 'cue', action: msg.action, id: msg.id }
@@ -168,7 +177,7 @@ on('cue', (msg) => {
   console.log(`[audio] cue #${msg.id} seat ${msg.seat} ${msg.action} at beat ${(T.ticks / T.PPQ).toFixed(2)} -> beat ${e.beat}`)
 })
 
-on('volume', (msg) => {
+store.on('volume', (msg) => {
   if (!live || !voices[msg.seat]) return
   // Heard at Tone.now(), so that's the tick we log.
   const tick = Math.round(T.getTicksAtTime(Tone.now()))

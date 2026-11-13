@@ -1,7 +1,7 @@
 // Fake server for ?mock=1. Same interface as the real socket: we get `send(msg)`,
 // and it calls `deliver(msg)` with server messages. Steps through every phase
 // with 6 fake players and random patterns.
-import { store } from '../state/store.js'
+import { setConnection } from '../state/store.js'
 import { MOCK_SPEED, SEAT_COLORS } from '../config.js'
 
 const NAMES = ['Maya', 'Theo', 'Priya', 'Jonas', 'Lena', 'Kofi']
@@ -38,7 +38,8 @@ export function createMockServer(deliver) {
     timers.forEach((t) => (clearTimeout(t), clearInterval(t)))
     timers = []
   }
-  const emit = (type, data) => deliver({ type, room, ...data })
+  // Round-trip through JSON like a real socket, so no message shares objects with mock state.
+  const emit = (type, data) => deliver(JSON.parse(JSON.stringify({ type, room, ...data })))
   const pushState = () => emit('state', { ...s, players })
   const phase = (name, len, extra = {}) => {
     clear()
@@ -154,7 +155,7 @@ export function createMockServer(deliver) {
   }
 
   // Returning "connected" right away mirrors the real socket's onopen + join.
-  store.connection = 'open'
+  setConnection('open')
   lobby()
 
   return {

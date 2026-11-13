@@ -60,3 +60,28 @@ button {
   color: var(--muted);
   font-size: 20px;
 }
+
+.frame {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.dot-beat {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 0.06s;
+}
+.dot-beat.on {
+  background: var(--accent);
+}

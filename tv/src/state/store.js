@@ -1,11 +1,13 @@
-import { reactive } from 'vue'
+// Plain-JS store, no framework imports. `getState()` returns an immutable snapshot that is
+// replaced on every change, so React's useSyncExternalStore (see useGameState.js) can
+// compare by reference. Only the update functions below change it.
+//
+// `game` is the latest full server `state` message; the rest are live events between snapshots.
 
-// Single reactive store. `state` is the latest full server snapshot;
-// the other fields are live events that arrive between snapshots.
-export const store = reactive({
+let state = {
   connection: 'idle', // idle | connecting | open | reconnecting
   room: null,
-  state: null,
+  game: null,
   selected: null, // seat the conductor is pointing at
   volumes: {}, // seat -> 0..100
   playing: {}, // seat -> true; set by the audio engine when a cue actually lands
@@ -13,14 +15,31 @@ export const store = reactive({
   calibrated: [], // seats calibrated so far
   noteCounts: {}, // seat -> notes placed during compose (counts only, never the notes)
   votes: {}, // round -> count
+  hits: {}, // seat -> notes played so far (bumped via Tone.Draw); drives seat flashes
+  phaseStartedAt: 0, // when the current phase began, for countdown rings
   beat: -1, // current beat, updated via Tone.Draw
   bar: -1,
   muted: new URLSearchParams(location.search).get('mute') === '1', // ?mute=1 starts silent
-  performances: {}, // round -> recorded performance (patterns + cue/volume log) for replays
+  // round -> recorded performance (patterns + cue/volume log) for replays. The engine appends
+  // to a performance's log in place; that never needs a re-render.
+  performances: {},
   messages: [], // last 10 received, newest first (debug overlay)
-})
+}
 
+const subscribers = new Set()
 const listeners = {}
+
+export const getState = () => state
+
+export function subscribe(fn) {
+  subscribers.add(fn)
+  return () => subscribers.delete(fn)
+}
+
+function set(patch) {
+  state = { ...state, ...patch }
+  subscribers.forEach((fn) => fn())
+}
 
 // Let other modules (audio) react to specific message types.
 export function on(type, fn) {
@@ -28,46 +47,60 @@ export function on(type, fn) {
   return () => listeners[type].delete(fn)
 }
 
+// ---- server messages ----
+
 export function handle(msg) {
-  store.messages.unshift({ at: Date.now(), msg })
-  store.messages.length = Math.min(store.messages.length, 10)
-  if (msg.room) store.room = msg.room
+  const patch = { messages: [{ at: Date.now(), msg }, ...state.messages].slice(0, 10) }
+  if (msg.room) patch.room = msg.room
 
   switch (msg.type) {
     case 'state': {
-      const prev = store.state?.phase
-      store.state = msg
-      store.selected = null
-      if (msg.phase !== prev) {
-        store.calibrated = msg.calibrated || []
-        if (msg.phase === 'perform') {
-          store.playing = {}
-          store.volumes = {}
-          store.lastCue = null
-        }
-        if (msg.phase === 'compose') store.noteCounts = {}
+      patch.game = msg
+      patch.selected = null
+      if (msg.phase !== state.game?.phase) {
+        patch.phaseStartedAt = Date.now()
+        patch.calibrated = msg.calibrated || []
+        if (msg.phase === 'perform') Object.assign(patch, { playing: {}, volumes: {}, lastCue: null })
+        if (msg.phase === 'compose') patch.noteCounts = {}
       }
-      if (msg.votes) store.votes = msg.votes
+      if (msg.votes) patch.votes = msg.votes
       break
     }
     case 'select':
-      store.selected = msg.seat
+      patch.selected = msg.seat
       break
     case 'volume':
-      store.volumes[msg.seat] = msg.level
+      patch.volumes = { ...state.volumes, [msg.seat]: msg.level }
       break
     case 'calibrated':
-      store.calibrated = msg.seats
+      patch.calibrated = msg.seats
       break
     case 'compose_progress':
-      store.noteCounts[msg.seat] = msg.notes
+      patch.noteCounts = { ...state.noteCounts, [msg.seat]: msg.notes }
       break
     case 'votes':
-      store.votes = msg.votes
+      patch.votes = msg.votes
       break
   }
 
+  set(patch)
   listeners[msg.type]?.forEach((fn) => fn(msg))
 }
 
-export const playerBySeat = (seat) => store.state?.players?.find((p) => p.seat === seat)
+// ---- local updates (connection, audio engine) ----
+
+export const setConnection = (connection) => set({ connection })
+export const setMuted = (muted) => set({ muted })
+export const setBeat = (beat) => set(beat % 4 === 0 ? { beat, bar: beat / 4 } : { beat })
+
+export function setCue(seat, action, beat) {
+  set({ playing: { ...state.playing, [seat]: action === 'in' }, lastCue: { seat, action, beat } })
+}
+export const setVolume = (seat, level) => set({ volumes: { ...state.volumes, [seat]: level } })
+export const bumpHit = (seat) => set({ hits: { ...state.hits, [seat]: (state.hits[seat] || 0) + 1 } })
+export const resetPlayback = () => set({ playing: {}, hits: {}, beat: -1, bar: -1 })
+export const savePerformance = (p) => set({ performances: { ...state.performances, [p.round]: p } })
+
+export const playerBySeat = (seat) => state.game?.players?.find((p) => p.seat === seat)
+
+if (import.meta.env.DEV) window.store = { getState } // inspect from devtools

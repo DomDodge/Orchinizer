@@ -1,4 +1,4 @@
-import { store, handle } from '../state/store.js'
+import { getState, handle, setConnection } from '../state/store.js'
 import { MOCK, WS_URL } from '../config.js'
 import { createMockServer } from './mock.js'
 
@@ -11,7 +11,7 @@ export function connect() {
 }
 
 export function send(type, data = {}) {
-  const msg = { type, room: store.room, ...data }
+  const msg = { type, room: getState().room, ...data }
   transport?.send(msg)
 }
 
@@ -23,12 +23,12 @@ function createSocket(url) {
   const queue = []
 
   function open() {
-    store.connection = retry ? 'reconnecting' : 'connecting'
+    setConnection(retry ? 'reconnecting' : 'connecting')
     ws = new WebSocket(url)
     ws.onopen = () => {
       retry = 0
-      store.connection = 'open'
-      ws.send(JSON.stringify({ type: 'join', room: store.room, role: 'tv' }))
+      setConnection('open')
+      ws.send(JSON.stringify({ type: 'join', room: getState().room, role: 'tv' }))
       while (queue.length) ws.send(queue.shift())
     }
     ws.onmessage = (e) => {
@@ -41,7 +41,7 @@ function createSocket(url) {
       handle(msg)
     }
     ws.onclose = () => {
-      store.connection = 'reconnecting'
+      setConnection('reconnecting')
       retry++
       setTimeout(open, Math.min(500 * 2 ** retry, 5000))
     }
