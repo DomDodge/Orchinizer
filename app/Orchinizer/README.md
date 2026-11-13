@@ -1,56 +1,38 @@
-# Welcome to your Expo app 👋
+# Orchinizer phone frontend
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Expo SDK 58 / React Native app for players and conductors. Run commands from `app/Orchinizer/` with Node 26 (the dev server loads TypeScript modules directly).
 
-## Get started
-
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **src/app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```sh
+npm ci
+npm start -- --tunnel ngrok
 ```
 
-This command will move the starter code to the **example** directory and create a blank **src/app** directory where you can start developing.
+Open the Expo Go link on each phone. The default WebSocket URL uses the same Metro host and tunnel at `/ws`. For web testing, run `npm run web`.
 
-### Other setup steps
+The working development lobby supports hosting and joining with a four-letter code, shared player/role/online status, conductor-selected instrument sections, unique instrument picks, reconnecting to a saved seat, leaving, and conductor-only removal of online or offline players. Tap **✕**, then **Remove?**, to remove someone.
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+The lobby runs in memory inside Metro. Restarting Expo clears rooms. Disconnected players keep their seat and instrument until they reconnect, leave, or the conductor removes them. The dev lobby stays in the lobby phase; there is no Start game action yet.
 
-## Learn more
+## Backend integration
 
-To learn more about developing your project with Expo, look at the following resources:
+The Go game server is in [`../../server/`](../../server/README.md); its shared contract is in [`../../protocol/`](../../protocol/README.md). `npm run server` starts that server in another terminal.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+This frontend still uses a prototype contract described in [`PROTOCOL.md`](PROTOCOL.md). The compose, calibration, performance, vote, and results screens exist, but the full game has not been verified against the current Go backend. Integration must reconcile token-based reconnects, `serverTime`, error/state fields, and the new phone-hosted lobby, categories, picks, leave, and kick messages. Setting a server URL alone does not resolve those differences.
 
-## Join the community
+Once the contracts match, select the game server with:
 
-Join our community of developers creating universal apps.
+```sh
+EXPO_PUBLIC_SERVER_URL=wss://YOUR_HOST/ws npm start -- --tunnel ngrok
+```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Checks and development tools
+
+```sh
+npm test
+npx tsc --noEmit
+npm run lint
+npm run sounds       # regenerate bundled instrument WAVs
+npm run sensor-log   # receive optional sensor-test recordings locally
+```
+
+Long-press the home-screen title to open the sensor test, then use **Point & select test** to test calibration and cues. The gesture tests cover heading wrap, target selection, flick cooldown/re-arming, tilt volume, and the all-out gesture. Lobby and network tests cover pick ownership, host privileges, removal, and reconnect behavior. Sensor CSV recordings are ignored by Git.
