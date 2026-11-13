@@ -1,11 +1,18 @@
-// PLACEHOLDER SOUNDS. Replace this whole file freely; engine.js only depends on the interface below.
+// Synth sounds, one recipe per instrument. engine.js only depends on the interface below.
 //
-// Exports one factory per instrument: bass, pad, lead, drums.
-//
-//   const inst = bass(destination, { key })
+//   const inst = create(instrument, destination, { key })
+//     instrument   the server's instrument id, e.g. 'violin' (see /protocol INSTRUMENT_GROUPS).
+//                  Unknown ids get the piano.
 //     destination  Tone.js node to connect your output to (the engine's master bus).
-//     key          the round's key as a note name, e.g. 'C', 'F#'.
+//     key          the round's key as a note name, e.g. 'C', 'Bb'.
 //
+//   inst.play(row, time, duration)
+//     row       0-4, the row of one note (0 = lowest). Drum kits (drums, timpani, bongos)
+//               use rows 0-2 only.
+//     time      exact AudioContext time to sound the note. Always pass it through to
+//               triggerAttack*/start(); never play "now", or it drifts off the beat.
+//     duration  seconds the note is held (a stretched note is longer). Plucked and struck
+//               instruments ring out on their own and ignore it.
 //   inst.play(row, time, duration?)
 //     row   0-4, the grid row of one lit cell (0 = lowest). For drums: 0 kick, 1 snare,
 //           2 hat; rows 3-4 are unused. If several rows are lit on a step, play() is
@@ -22,8 +29,10 @@
 //   inst.dispose()
 //     free every node; called when the performance ends.
 //
-// Each player gets their own instance, so two basses in one round never share state.
+// Each player gets their own instance, so two of the same instrument never share state.
 // Pitch: the five rows are the major pentatonic of the round's key; see `notesFor`.
+// The phone's preview samples (app/Orchinizer/scripts/gen-sounds.mjs) mimic these recipes and
+// use the same octaves, so keep the two in step when changing a sound.
 import * as Tone from 'tone'
 
 const PENTATONIC = [0, 2, 4, 7, 9] // semitones above the root; row n plays PENTATONIC[n]
@@ -33,10 +42,11 @@ export function notesFor(key, octave) {
   return PENTATONIC.map((i) => Tone.Frequency(root + i, 'midi').toNote())
 }
 
-// Shared plumbing: a gain node per instrument so setVolume works the same everywhere.
-function withVolume(destination, nodes, play) {
+// Shared plumbing: every instrument ends in one gain node, so setVolume works the same everywhere.
+// `nodes` are disposed with it; `out` is the node that feeds the gain.
+function instrument(destination, out, nodes, play) {
   const gain = new Tone.Gain(0.64).connect(destination) // 80/100, squared
-  nodes[0].connect(gain)
+  out.connect(gain)
   return {
     play,
     setVolume: (level, time) => gain.gain.rampTo((level / 100) ** 2, 0.05, time),
@@ -63,15 +73,6 @@ export function lead(destination, { key }) {
   return withVolume(destination, [synth], (row, time, dur) => synth.triggerAttackRelease(notes[row], dur || '16n', time))
 }
 
-export function drums(destination) {
-  const out = new Tone.Gain(1)
-  const kick = new Tone.MembraneSynth().connect(out)
-  const snare = new Tone.NoiseSynth({ envelope: { decay: 0.1, sustain: 0 }, volume: -10 }).connect(out)
-  const hat = new Tone.NoiseSynth({ envelope: { decay: 0.03, sustain: 0 }, volume: -20 }).connect(out)
-  const hits = [
-    (t) => kick.triggerAttackRelease('C1', '8n', t),
-    (t) => snare.triggerAttackRelease('16n', t),
-    (t) => hat.triggerAttackRelease('32n', t),
-  ]
-  return withVolume(destination, [out, kick, snare, hat], (row, time) => hits[row]?.(time))
+export function create(instrumentId, destination, { key }) {
+  return (RECIPES[instrumentId] || RECIPES.piano)(destination, key)
 }

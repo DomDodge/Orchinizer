@@ -59,6 +59,12 @@ export function on(type, fn) {
 function fromServerState(msg, prev) {
   const locked = msg.phase === 'calibrate' || msg.phase === 'perform'
   const patterns = msg.patterns || {}
+  const notes = msg.notes || {} // note-editor parts; when a seat has notes they replace its grid
+  const players = (msg.players || []).map((p) => ({
+    ...p,
+    pattern:
+      locked && p.seat !== msg.conductor && patterns[p.seat]
+        ? { instrument: p.instrument, grid: patterns[p.seat], notes: notes[p.seat] }
   const notes = msg.notes || {}
   const players = (msg.players || []).map((p) => ({
     ...p,

@@ -1,15 +1,9 @@
 // Piano-roll note editor: pitch runs up, time runs across, a note is a bar whose width is its length.
 // All the rules live in notes.ts; this file only turns touches into calls to it.
+// Touch handling is plain React Native: Pressable for taps on the grid, responder props for dragging notes.
 import * as Haptics from 'expo-haptics';
-import { useRef, useState } from 'react';
-import { type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
-import {
-  GestureDetector,
-  useCompetingGestures,
-  useLongPressGesture,
-  usePanGesture,
-  useTapGesture,
-} from 'react-native-gesture-handler';
+import { useEffect, useRef, useState } from 'react';
+import { type GestureResponderEvent, type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
 import { LOOP_STEPS, MAX_NOTES, ROWS, STEPS_PER_BEAT, type Note } from '../../../../protocol/messages.ts';
 import { fits, move, place, remove, resize } from '../notes';
 import { noteName } from '../protocol';
@@ -20,6 +14,9 @@ const BARS = LOOP_STEPS / BAR_STEPS;
 const ROW_H = 52;
 const LABEL_W = 40;
 const HANDLE_W = 22; // touch area on a note's right edge for stretching
+const HOLD_MS = 450; // hold a note still this long to delete it
+const MOVE_SLOP = 6; // px the finger must travel before a hold becomes a drag
+const EDGE_SLOP = 2;
 
 let idN = 0;
 const newId = () => `${Date.now().toString(36)}-${idN++}`;
@@ -32,7 +29,7 @@ type Props = {
   keyName: string;
   /** Locks the editor, e.g. when the compose timer runs out. */
   disabled?: boolean;
-  /** For an audio preview when a note is placed. */
+  /** For an audio preview when a note is placed, moved or stretched. */
   onPlace?: (note: Note) => void;
   /** How many rows to show, from row 0 up (drums use 3). At most ROWS. */
   rows?: number;
@@ -53,20 +50,19 @@ export function NoteEditor({ notes, onChange, color, keyName, disabled = false, 
     if (next !== notes) onChange(next);
   };
 
-  const tap = useTapGesture({
-    runOnJS: true,
-    enabled: !disabled && width > 0,
-    onActivate: (e) => {
-      const start = offset + Math.floor(e.x / cellW);
-      const row = rows - 1 - Math.floor(e.y / ROW_H); // top row = highest note
-      if (full) return void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      const next = place(notes, row, start, newId());
-      if (!next) return;
-      Haptics.selectionAsync();
-      onChange(next);
-      onPlace?.(next[next.length - 1]);
-    },
-  });
+  // Taps land on the grid itself: the background has pointerEvents="none", so locationX/Y are grid coordinates.
+  const onTap = (e: GestureResponderEvent) => {
+    if (disabled || width === 0) return;
+    const { locationX, locationY } = e.nativeEvent;
+    const start = offset + Math.floor(locationX / cellW);
+    const row = rows - 1 - Math.floor(locationY / ROW_H); // top row = highest note
+    if (full) return void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    const next = place(notes, row, start, newId());
+    if (!next) return;
+    Haptics.selectionAsync();
+    onChange(next);
+    onPlace?.(next[next.length - 1]);
+  };
 
   return (
     <View style={styles.wrap}>
@@ -90,9 +86,14 @@ export function NoteEditor({ notes, onChange, color, keyName, disabled = false, 
           ))}
         </View>
 
-        <GestureDetector gesture={tap}>
-          <View style={[styles.grid, { height: ROW_H * rows }]} onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
-            {/* Background: rows, with every beat shaded so notes are easy to line up. */}
+        <Pressable
+          onPress={onTap}
+          disabled={disabled}
+          style={[styles.grid, { height: ROW_H * rows }]}
+          onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}
+        >
+          {/* Background: rows, with every beat shaded so notes are easy to line up. */}
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
             {Array.from({ length: rows }, (_, i) => (
               <View key={i} style={[styles.row, i % 2 === 1 && styles.rowAlt]}>
                 {Array.from({ length: BAR_STEPS }, (_, s) => (
@@ -100,27 +101,28 @@ export function NoteEditor({ notes, onChange, color, keyName, disabled = false, 
                 ))}
               </View>
             ))}
-            {width > 0 &&
-              notes
-                .filter((n) => n.start < offset + BAR_STEPS && n.start + n.length > offset)
-                .map((n) => (
-                  <NoteView
-                    key={n.id}
-                    note={n}
-                    notes={notes}
-                    cellW={cellW}
-                    offset={offset}
-                    color={color}
-                    disabled={disabled}
-                    commit={commit}
-                    rows={rows}
-                  />
-                ))}
-            {width > 0 && playhead >= offset && playhead < offset + BAR_STEPS && (
-              <View pointerEvents="none" style={[styles.playhead, { left: (playhead - offset) * cellW }]} />
-            )}
           </View>
-        </GestureDetector>
+          {width > 0 &&
+            notes
+              .filter((n) => n.start < offset + BAR_STEPS && n.start + n.length > offset)
+              .map((n) => (
+                <NoteView
+                  key={n.id}
+                  note={n}
+                  notes={notes}
+                  cellW={cellW}
+                  offset={offset}
+                  color={color}
+                  disabled={disabled}
+                  commit={commit}
+                  onPlace={onPlace}
+                  rows={rows}
+                />
+              ))}
+          {width > 0 && playhead >= offset && playhead < offset + BAR_STEPS && (
+            <View pointerEvents="none" style={[styles.playhead, { left: (playhead - offset) * cellW }]} />
+          )}
+        </Pressable>
       </View>
 
       <Text style={styles.hint}>Tap to add · drag to move · drag the right edge to stretch · hold to delete</Text>
@@ -138,6 +140,9 @@ function landing(note: Note, drag: Drag | null, cellW: number): Note {
   return { ...note, row: note.row - Math.round(drag.dy / ROW_H), start: note.start + dSteps };
 }
 
+/** One finger on a note, from touch-down to lift. Positions are page coordinates, which don't shift as the note moves. */
+type Touch = { kind: Drag['kind']; x0: number; y0: number; dragging: boolean; deleted: boolean };
+
 function NoteView({
   note,
   notes,
@@ -146,6 +151,7 @@ function NoteView({
   color,
   disabled,
   commit,
+  onPlace,
   rows,
 }: {
   note: Note;
@@ -155,6 +161,7 @@ function NoteView({
   color: string;
   disabled: boolean;
   commit: (next: Note[]) => void;
+  onPlace?: (note: Note) => void;
   rows: number;
 }) {
   const [drag, setDragState] = useState<Drag | null>(null);
@@ -165,45 +172,71 @@ function NoteView({
     setDragState(d);
   };
 
-  const candidate = landing(note, drag, cellW);
-  const valid = !drag || (candidate.row < rows && fits(notes, candidate));
+  const touch = useRef<Touch | null>(null);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearHold = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+  };
+  useEffect(() => clearHold, []);
 
   const finish = () => {
     const d = latest.current;
     const c = landing(note, d, cellW);
-    if (d?.kind === 'move' && c.row < rows) commit(move(notes, note.id, c.row, c.start));
-    else if (d?.kind === 'resize') commit(resize(notes, note.id, c.length));
+    let next = notes;
+    if (d?.kind === 'move' && c.row < rows) next = move(notes, note.id, c.row, c.start);
+    else if (d?.kind === 'resize') next = resize(notes, note.id, c.length);
+    setDrag(null);
+    if (next === notes) return; // invalid drop: it snaps back
+    commit(next);
+    const moved = next.find((n) => n.id === note.id);
+    if (moved) onPlace?.(moved); // hear where it landed, for as long as it now lasts
+  };
+
+  // Handlers for React Native's responder props, rebuilt every render so they always see the current props.
+  const canStart = () => !disabled;
+  const keep = () => false; // don't hand the touch to anyone else while the finger is down
+
+  const grant = (kind: Drag['kind'], e: GestureResponderEvent) => {
+    const t: Touch = { kind, x0: e.nativeEvent.pageX, y0: e.nativeEvent.pageY, dragging: false, deleted: false };
+    touch.current = t;
+    // Holding the body still deletes the note; the stretch handle only stretches.
+    if (kind === 'move') {
+      holdTimer.current = setTimeout(() => {
+        holdTimer.current = null;
+        t.deleted = true;
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        commit(remove(notes, note.id));
+      }, HOLD_MS);
+    }
+  };
+
+  const track = (e: GestureResponderEvent) => {
+    const t = touch.current;
+    if (!t || t.deleted) return;
+    const dx = e.nativeEvent.pageX - t.x0;
+    const dy = e.nativeEvent.pageY - t.y0;
+    if (!t.dragging && Math.hypot(dx, dy) < (t.kind === 'move' ? MOVE_SLOP : EDGE_SLOP)) return;
+    if (!t.dragging) clearHold();
+    t.dragging = true;
+    setDrag({ kind: t.kind, dx, dy: t.kind === 'move' ? dy : 0 });
+  };
+
+  const release = () => {
+    clearHold();
+    const t = touch.current;
+    touch.current = null;
+    if (t?.dragging && !t.deleted) finish();
+  };
+
+  const terminate = () => {
+    clearHold();
+    touch.current = null;
     setDrag(null);
   };
 
-  const body = usePanGesture({
-    runOnJS: true,
-    enabled: !disabled,
-    minDistance: 6,
-    onUpdate: (e) => setDrag({ kind: 'move', dx: e.translationX, dy: e.translationY }),
-    onDeactivate: finish,
-    onFinalize: () => setDrag(null),
-  });
-  const hold = useLongPressGesture({
-    runOnJS: true,
-    enabled: !disabled,
-    minDuration: 450,
-    onActivate: () => {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      commit(remove(notes, note.id));
-    },
-  });
-  const edge = usePanGesture({
-    runOnJS: true,
-    enabled: !disabled,
-    minDistance: 2,
-    onUpdate: (e) => setDrag({ kind: 'resize', dx: e.translationX, dy: 0 }),
-    onDeactivate: finish,
-    onFinalize: () => setDrag(null),
-  });
-  // Whichever activates first wins: moving the finger starts a drag, holding still deletes.
-  const bodyGesture = useCompetingGestures(body, hold);
-
+  const candidate = landing(note, drag, cellW);
+  const valid = !drag || (candidate.row < rows && fits(notes, candidate));
   const left = (candidate.start - offset) * cellW;
   const top = (rows - 1 - candidate.row) * ROW_H;
   const w = candidate.length * cellW;
@@ -216,14 +249,26 @@ function NoteView({
         !valid && styles.noteInvalid,
       ]}
     >
-      <GestureDetector gesture={bodyGesture}>
-        <View style={StyleSheet.absoluteFill} />
-      </GestureDetector>
-      <GestureDetector gesture={edge}>
-        <View style={styles.handle}>
-          <View style={styles.grip} />
-        </View>
-      </GestureDetector>
+      <View
+        style={StyleSheet.absoluteFill}
+        onStartShouldSetResponder={canStart}
+        onResponderTerminationRequest={keep}
+        onResponderGrant={(e) => grant('move', e)}
+        onResponderMove={track}
+        onResponderRelease={release}
+        onResponderTerminate={terminate}
+      />
+      <View
+        style={styles.handle}
+        onStartShouldSetResponder={canStart}
+        onResponderTerminationRequest={keep}
+        onResponderGrant={(e) => grant('resize', e)}
+        onResponderMove={track}
+        onResponderRelease={release}
+        onResponderTerminate={terminate}
+      >
+        <View pointerEvents="none" style={styles.grip} />
+      </View>
     </View>
   );
 }
