@@ -1,5 +1,6 @@
 // Note lanes above each performing seat, drawn on a canvas. Notes fall at a constant 56px
-// per eighth note and touch the seat at the exact moment the TV plays them.
+// per eighth note and touch the seat at the exact moment the TV plays them. A held note
+// (from the phone's note editor) is drawn as a bar as tall as it lasts.
 //
 // This never re-renders through React. A requestAnimationFrame loop reads the Transport
 // position (engine.timeline()) and the store (getState()) every frame, so positions come
@@ -8,9 +9,12 @@
 import { useEffect, useRef } from 'react'
 import { timeline, seatOn } from '../audio/engine.js'
 import { getState } from '../state/store.js'
+import { partNotes, STEPS_PER_BEAT } from '../audio/part.js'
 import { seatPos, SEAT_R, LANE_TOP } from './layout.js'
 
 const PX_PER_EIGHTH = 56
+const PX_PER_STEP = PX_PER_EIGHTH / 2 // steps are 16th notes
+const R = 10 // note head radius
 const LANE_W = 96
 const ROW_GAP = 16 // horizontal offset per pitch row
 const FADE = 70 // px over which notes fade in at the top
@@ -20,8 +24,8 @@ function draw(ctx) {
   const { game, selected } = getState()
   if (!game) return
   const tl = timeline()
-  const ticksPerEighth = tl.ppq / 2
-  const now = tl.tick / ticksPerEighth // in eighth notes
+  const ticksPerStep = tl.ppq / STEPS_PER_BEAT
+  const now = tl.tick / ticksPerStep // in 16th-note steps
 
   for (const p of game.players) {
     if (p.seat === game.conductor) continue
@@ -36,18 +40,21 @@ function draw(ctx) {
     ctx.fill()
     if (!tl.running || !p.pattern) continue
 
-    const grid = p.pattern.grid
-    const ahead = (bottom - LANE_TOP) / PX_PER_EIGHTH
+    const { loopSteps, notes } = partNotes(p.pattern)
+    const ahead = (bottom - LANE_TOP) / PX_PER_STEP
     for (let e = Math.ceil(now); e <= now + ahead; e++) {
-      const step = e % 8
-      const y = bottom - (e - now) * PX_PER_EIGHTH
+      const step = e % loopSteps
+      const y = bottom - (e - now) * PX_PER_STEP // where the note starts (touches the seat)
       const alpha = Math.min(1, (y - LANE_TOP) / FADE)
       if (alpha <= 0) continue
-      const on = seatOn(p.seat, e * ticksPerEighth)
-      for (let row = 0; row < 5; row++) {
-        if (!grid[row]?.[step]) continue
+      const on = seatOn(p.seat, e * ticksPerStep)
+      for (const n of notes) {
+        if (n.start !== step) continue
+        const x = laneX + (n.row - 2) * ROW_GAP
+        // Grid notes are dots; held notes stretch upward for as long as they sound.
+        const tail = n.fromGrid ? 0 : Math.max(0, n.length * PX_PER_STEP - 2 * R - 4)
         ctx.beginPath()
-        ctx.arc(laneX + (row - 2) * ROW_GAP, y, 10, 0, Math.PI * 2)
+        ctx.roundRect(x - R, Math.max(LANE_TOP, y - R - tail), 2 * R, 2 * R + Math.min(tail, y - R - LANE_TOP), R)
         if (on) {
           ctx.globalAlpha = alpha
           ctx.fillStyle = p.color

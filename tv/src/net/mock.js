@@ -24,10 +24,21 @@ function randomGrid(instrument) {
   return grid
 }
 
+// A note-editor part: held notes in 16th steps over a 2-bar (32-step) loop, never overlapping.
+function randomNotes() {
+  const notes = []
+  for (let start = 0; start < 32; start += 4) {
+    if (Math.random() < 0.35) continue
+    notes.push({ id: `n${start}`, row: rand(5), start, length: 1 + rand(4) })
+  }
+  return notes
+}
+
 export function createMockServer(deliver) {
   const room = Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[rand(24)]).join('')
   let players = []
-  let patterns = {} // seat -> grid
+  let patterns = {} // seat -> grid (grid-sequencer phones)
+  let notes = {} // seat -> notes (note-editor phones: the even seats here)
   let s = {} // phase, round, conductor, key, tempo, deadline, performances, winner
   let timers = []
   let cueId = 0
@@ -54,6 +65,7 @@ export function createMockServer(deliver) {
       tempo: s.tempo || 100,
       players,
       patterns,
+      notes,
       performances: s.performances || [],
       winner: s.winner || 0,
     })
@@ -68,6 +80,7 @@ export function createMockServer(deliver) {
   function lobby() {
     s = { performances: [] }
     patterns = {}
+    notes = {}
     nextPhase = null
     phase('lobby')
     if (players.length) return
@@ -85,18 +98,22 @@ export function createMockServer(deliver) {
   function compose(round) {
     const [key, tempo] = pick(KEYS)
     patterns = {}
+    notes = {}
     players.forEach((p) => (p.noteCount = 0))
     phase('compose', LEN.compose, { round, conductor: conductorFor(round), key, tempo })
     // Patterns are decided now; the TV only shows note counts until compose ends.
-    const hidden = Object.fromEntries(performers().map((p) => [p.seat, randomGrid(p.instrument)]))
+    const editor = (p) => p.seat % 2 === 0
+    const hidden = Object.fromEntries(performers().filter((p) => !editor(p)).map((p) => [p.seat, randomGrid(p.instrument)]))
+    const hiddenNotes = Object.fromEntries(performers().filter(editor).map((p) => [p.seat, randomNotes()]))
     every(400, () => {
       const p = pick(performers())
-      const total = hidden[p.seat].flat().filter(Boolean).length
+      const total = editor(p) ? hiddenNotes[p.seat].length : hidden[p.seat].flat().filter(Boolean).length
       p.noteCount = Math.min(total, p.noteCount + 1)
       pushState()
     })
     nextPhase = () => {
       patterns = hidden
+      notes = hiddenNotes
       calibrate()
     }
     later(LEN.compose, nextPhase)
