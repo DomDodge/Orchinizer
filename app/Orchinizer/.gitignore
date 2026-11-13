@@ -41,6 +41,3 @@ example
 # generated native folders
 /ios
 /android
-
-# sensor test recordings
-sensor-log*.csv

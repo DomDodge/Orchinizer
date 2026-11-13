@@ -1,4 +1,4 @@
-// TS mirror of ../PROTOCOL.md. Change both together.
+// Frontend message types. Align with the repository's shared protocol during backend integration.
 
 export type Phase = 'lobby' | 'compose' | 'calibrate' | 'perform' | 'vote' | 'results';
 /** Synth voice an instrument previews with on the phone. */

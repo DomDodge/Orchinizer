@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { clearError, connect, SERVER_URL, useNet } from '../net';
-import { SensorTest } from './SensorTest';
+import { KeyboardAvoidingView, Platform, StyleSheet, TextInput, View } from 'react-native';
+import { clearError, connect, useNet } from '../net';
 import { Btn, DIM, FG, H1, P, Screen } from './ui';
 
 /** Home (host, or enter a code) → name screen → connect. step.room '' = hosting. */
@@ -10,9 +9,6 @@ export function Join() {
   const [code, setCode] = useState('');
   const [step, setStep] = useState<{ room: string } | null>(null);
   const [name, setName] = useState('');
-  const [sensorTest, setSensorTest] = useState(false);
-
-  if (sensorTest) return <SensorTest onClose={() => setSensorTest(false)} />;
 
   if (step) {
     const go = () => name.trim() && connect(name, step.room);
@@ -51,10 +47,7 @@ export function Join() {
   return (
     <Screen style={{ justifyContent: 'center' }}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ gap: 14 }}>
-        {/* Long-press the title for the dev-only sensor test. */}
-        <Pressable onLongPress={() => setSensorTest(true)}>
-          <H1>🎼 Phone Orchestra</H1>
-        </Pressable>
+        <H1>🎼 Phone Orchestra</H1>
         <Btn label="Host a room" onPress={() => setStep({ room: '' })} />
 
         <View style={styles.divider} />
@@ -72,7 +65,6 @@ export function Join() {
         />
         <Btn label="Join a room" color="#333" disabled={code.length !== 4} onPress={() => setStep({ room: code })} />
         {error && <P color="#FF5252">{error}</P>}
-        <P>{SERVER_URL}</P>
       </KeyboardAvoidingView>
     </Screen>
   );

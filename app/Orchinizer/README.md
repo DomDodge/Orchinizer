@@ -1,38 +1,22 @@
 # Orchinizer phone frontend
 
-Expo SDK 58 / React Native app for players and conductors. Run commands from `app/Orchinizer/` with Node 26 (the dev server loads TypeScript modules directly).
+Expo SDK 58 / React Native screens for players and conductors: host/join, lobby and instrument selection, compose, calibration, performance, voting, and results. Includes motion controls, haptics, and the audio assets used for note previews.
+
+Run from `app/Orchinizer/`:
 
 ```sh
 npm ci
-npm start -- --tunnel ngrok
+EXPO_PUBLIC_SERVER_URL=wss://YOUR_HOST/ws npm start
 ```
 
-Open the Expo Go link on each phone. The default WebSocket URL uses the same Metro host and tunnel at `/ws`. For web testing, run `npm run web`.
+Set the WebSocket URL to a server the phones can reach. For a local server, use the laptop's LAN address instead of `localhost`. The app reports an error if no server URL is configured.
 
-The working development lobby supports hosting and joining with a four-letter code, shared player/role/online status, conductor-selected instrument sections, unique instrument picks, reconnecting to a saved seat, leaving, and conductor-only removal of online or offline players. Tap **✕**, then **Remove?**, to remove someone.
+The frontend currently uses an earlier message contract. Integration with the current Go backend still needs token-based reconnects, state/error fields, and the new lobby actions reconciled with the shared protocol in `../../protocol/`. Full gameplay against that backend is not yet verified.
 
-The lobby runs in memory inside Metro. Restarting Expo clears rooms. Disconnected players keep their seat and instrument until they reconnect, leave, or the conductor removes them. The dev lobby stays in the lobby phase; there is no Start game action yet.
-
-## Backend integration
-
-The Go game server is in [`../../server/`](../../server/README.md); its shared contract is in [`../../protocol/`](../../protocol/README.md). `npm run server` starts that server in another terminal.
-
-This frontend still uses a prototype contract described in [`PROTOCOL.md`](PROTOCOL.md). The compose, calibration, performance, vote, and results screens exist, but the full game has not been verified against the current Go backend. Integration must reconcile token-based reconnects, `serverTime`, error/state fields, and the new phone-hosted lobby, categories, picks, leave, and kick messages. Setting a server URL alone does not resolve those differences.
-
-Once the contracts match, select the game server with:
-
-```sh
-EXPO_PUBLIC_SERVER_URL=wss://YOUR_HOST/ws npm start -- --tunnel ngrok
-```
-
-## Checks and development tools
+Frontend checks:
 
 ```sh
 npm test
 npx tsc --noEmit
 npm run lint
-npm run sounds       # regenerate bundled instrument WAVs
-npm run sensor-log   # receive optional sensor-test recordings locally
 ```
-
-Long-press the home-screen title to open the sensor test, then use **Point & select test** to test calibration and cues. The gesture tests cover heading wrap, target selection, flick cooldown/re-arming, tilt volume, and the all-out gesture. Lobby and network tests cover pick ownership, host privileges, removal, and reconnect behavior. Sensor CSV recordings are ignored by Git.

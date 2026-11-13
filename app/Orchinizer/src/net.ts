@@ -1,13 +1,8 @@
-import Constants from 'expo-constants';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Platform } from 'react-native';
 import type { ClientMsg, ServerMsg, State } from './protocol';
 
-// Dev default: the mock lobby on the Metro server that served this bundle (LAN or tunnel), see metro.config.js.
-// Real game: EXPO_PUBLIC_SERVER_URL=wss://<Bryson's host>/ws.
-const metroHost = Platform.OS === 'web' ? globalThis.location?.host : Constants.expoConfig?.hostUri;
-const secure = Platform.OS === 'web' ? globalThis.location?.protocol === 'https:' : !!metroHost?.endsWith('.exp.direct');
-export const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL || `${secure ? 'wss' : 'ws'}://${metroHost || 'localhost:8081'}/ws`;
+// Set this to the game server's WebSocket endpoint when starting Expo.
+export const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL || '';
 
 type Snap = { connected: boolean; joining: boolean; state: State | null; seat: number; error: string | null };
 let snap: Snap = { connected: false, joining: false, state: null, seat: 0, error: null };
@@ -35,6 +30,7 @@ let join: { name: string; room: string } | null = null; // room '' = host
 
 /** No room = host a new one. */
 export function connect(name: string, room = '') {
+  if (!SERVER_URL) return set({ error: 'The game server is not configured yet.', joining: false });
   join = { name, room: room.trim().toUpperCase() };
   set({ error: null, joining: true });
   open();

@@ -9,7 +9,7 @@ const source = ts.transpileModule(readFileSync(new URL('../src/net.ts', import.m
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
-function client() {
+function client(serverUrl = 'ws://localhost:8080/ws') {
   const sockets: FakeSocket[] = [];
   const retries: (() => void)[] = [];
   class FakeSocket {
@@ -26,18 +26,16 @@ function client() {
   }
   const exports: Record<string, any> = {};
   runInNewContext(source, {
-    exports, WebSocket: FakeSocket, process: { env: {} },
+    exports, WebSocket: FakeSocket, process: { env: { EXPO_PUBLIC_SERVER_URL: serverUrl } },
     setTimeout: (f: () => void) => retries.push(f),
     require: (name: string) => {
-      if (name === 'expo-constants') return { default: { expoConfig: { hostUri: 'localhost:8081' } } };
-      if (name === 'react-native') return { Platform: { OS: 'ios' } };
       if (name === 'react') return { useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot() };
       throw new Error(`Unexpected import: ${name}`);
     },
   });
   exports.connect('Ana', 'ABCD');
   const socket = sockets[0];
-  socket.onopen();
+  socket?.onopen();
   return { net: exports, socket, retries, sockets };
 }
 
@@ -83,4 +81,11 @@ test('unintentional disconnect after joining still reconnects to the same room',
   retries[0]();
   sockets[1].onopen();
   assert.equal((sockets[1].sent[0] as { room: string }).room, 'ABCD');
+});
+
+test('missing server configuration shows an error without opening a connection', () => {
+  const { net, sockets } = client('');
+  assert.equal(sockets.length, 0);
+  assert.equal(net.useNet().joining, false);
+  assert.equal(net.useNet().error, 'The game server is not configured yet.');
 });
