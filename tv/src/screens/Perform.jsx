@@ -38,7 +38,12 @@ export default function Perform() {
   const cuePlayer = lastCue && players.find((p) => p.seat === lastCue.seat)
 
   return (
-    <Stage seats={seats} beam={selected} under={<NoteLanes />}>
+    <Stage seats={seats} beam={selected} under={
+        <>
+          {beat >= 0 && <div key={beat} className={`beat-pulse ${beat % 4 === 0 ? 'down' : ''}`} />}
+          <NoteLanes />
+        </>
+      }>
       <div className="perf-top">
         <span className="perf-round num">Round {game.round}</span>
         <span className="perf-who">

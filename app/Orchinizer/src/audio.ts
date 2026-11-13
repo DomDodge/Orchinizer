@@ -1,59 +1,91 @@
 // Phone audio is Preview only (the TV plays the show), so keep it quiet.
-import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
-import { keyRoot, SCALE, type Voice } from './protocol';
-import { SOUNDS } from './sounds.gen';
+// Each instrument has its own samples (scripts/gen-sounds.mjs), voiced like its TV synth.
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
+import { instrumentInfo, keyRoot, SCALE } from './protocol';
+import { SAMPLE_STEP, SOUNDS } from './sounds.gen';
 
 const PREVIEW_VOLUME = 0.5;
-const players = new Map<number, AudioPlayer>();
 
-function player(source: number) {
-  let p = players.get(source);
+const isKit = (instrument: string) => instrumentInfo(instrument).voice === 'drums';
+
+type Sound = { id: string; source: number; rate: number };
+
+/**
+ * The bundled sample for a row and the playback rate that tunes it. Tonal samples are SAMPLE_STEP
+ * semitones apart, so the rate stays within a few semitones of 1. Unknown instruments use the piano.
+ */
+function soundFor(instrument: string, key: string, row: number): Sound | null {
+  const bank = SOUNDS[instrument] ?? SOUNDS.piano;
+  if (isKit(instrument)) {
+    const source = bank[row];
+    return source == null ? null : { id: `${instrument}:${row}`, source, rate: 1 };
+  }
+  const semitone = keyRoot(key) + SCALE[row];
+  const i = Math.min(bank.length - 1, Math.floor(semitone / SAMPLE_STEP));
+  return { id: `${instrument}:${semitone}`, source: bank[i], rate: 2 ** ((semitone - i * SAMPLE_STEP) / 12) };
+}
+
+// One player per pitch, so two rows tuned from the same sample can sound together.
+const players = new Map<string, AudioPlayer>();
+
+function player(sound: Sound) {
+  let p = players.get(sound.id);
   if (!p) {
-    p = createAudioPlayer(source);
+    p = createAudioPlayer(sound.source);
     p.volume = PREVIEW_VOLUME;
-    players.set(source, p);
+    players.set(sound.id, p);
   }
   return p;
 }
 
-function sourceFor(inst: Voice, key: string, row: number) {
-  if (inst === 'drums') return SOUNDS.drums[row];
-  const semitone = keyRoot(key) + SCALE[row];
-  return SOUNDS[inst][semitone >= SOUNDS[inst].length ? semitone - 12 : semitone];
+let audioModeSet = false;
+/** Play previews even with the ring/silent switch on, alongside any music already playing. */
+function ensureAudioMode() {
+  if (audioModeSet) return;
+  audioModeSet = true;
+  setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'mixWithOthers' }).catch(() => {
+    audioModeSet = false;
+  });
 }
 
 /** Create the players for an instrument up front so the first tap isn't late. */
-export function preload(inst: Voice, key: string) {
-  const rows = inst === 'drums' ? 3 : SCALE.length;
-  for (let r = 0; r < rows; r++) player(sourceFor(inst, key, r));
+export function preload(instrument: string, key: string) {
+  ensureAudioMode();
+  const rows = isKit(instrument) ? 3 : SCALE.length;
+  for (let r = 0; r < rows; r++) {
+    const s = soundFor(instrument, key, r);
+    if (s) player(s);
+  }
 }
 
 /** Pending stops from playNoteFor, by sound, so a replay of the same sound isn't cut short. */
-const stops = new Map<number, ReturnType<typeof setTimeout>>();
+const stops = new Map<string, ReturnType<typeof setTimeout>>();
 
 /** Play a note for `ms` milliseconds, then stop it (a stretched note). Samples shorter than that end early. */
-export function playNoteFor(inst: Voice, key: string, row: number, ms: number) {
-  const src = sourceFor(inst, key, row);
-  if (src == null) return;
-  playNote(inst, key, row);
-  if (inst === 'drums') return; // hits ring out on their own
-  stops.set(src, setTimeout(() => {
-    stops.delete(src);
-    player(src).pause();
+export function playNoteFor(instrument: string, key: string, row: number, ms: number) {
+  const s = soundFor(instrument, key, row);
+  if (!s) return;
+  playNote(instrument, key, row);
+  if (isKit(instrument)) return; // hits ring out on their own
+  stops.set(s.id, setTimeout(() => {
+    stops.delete(s.id);
+    player(s).pause();
   }, ms));
 }
 
-export function playNote(inst: Voice, key: string, row: number) {
-  const src = sourceFor(inst, key, row);
-  if (src == null) return;
-  const pending = stops.get(src);
+export function playNote(instrument: string, key: string, row: number) {
+  const s = soundFor(instrument, key, row);
+  if (!s) return;
+  ensureAudioMode();
+  const pending = stops.get(s.id);
   if (pending) {
     clearTimeout(pending);
-    stops.delete(src);
+    stops.delete(s.id);
   }
-  const p = player(src);
-  p.shouldCorrectPitch = false;
-  p.setPlaybackRate(inst !== 'drums' && keyRoot(key) + SCALE[row] >= 19 ? 2 : 1);
+  const p = player(s);
+  // Don't set p.playbackRate: on iOS (Expo Go, SDK 58) setting a non-integer rate hangs the app,
+  // which froze the compose screen on the first note. Previews play the nearest sample below the
+  // note at its recorded pitch (up to SAMPLE_STEP - 1 semitones flat); the TV plays the real thing.
   p.seekTo(0);
   p.play();
 }

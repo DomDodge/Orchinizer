@@ -6,8 +6,8 @@
 export const STEPS_PER_BEAT = 4
 
 // -> { loopSteps, notes: [{ row, start, length, instrument, fromGrid }] }
-// `instrument` is '' for "the player's own instrument". Grid notes are marked fromGrid so
-// instruments keep their own natural note length for them.
+// `instrument` is '' for "the player's own instrument". Grid notes (fromGrid) are drawn as
+// dots on the TV; they play for an eighth note.
 export function partNotes(pattern) {
   if (pattern?.notes?.length) {
     return {

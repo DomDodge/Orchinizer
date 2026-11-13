@@ -9,6 +9,7 @@ import Compose from './screens/Compose.jsx'
 import NextRound from './screens/NextRound.jsx'
 import Vote from './screens/Vote.jsx'
 import Results from './screens/Results.jsx'
+import DebugOverlay from './debug/DebugOverlay.jsx'
 
 // Screens get registered here as they're built; anything missing shows the placeholder.
 const SCREENS = {
@@ -41,7 +42,11 @@ export default function App() {
   const Screen = started ? SCREENS[phase] || Placeholder : null
   return (
     <div className="frame" style={{ transform: `translate(-50%, -50%) scale(${scale})` }}>
-      {Screen ? <Screen /> : <StartShow onStarted={() => setStarted(true)} />}
+      {/* Re-keyed per phase so each screen fades in. */}
+      <div key={Screen ? phase : 'start'} className="screen-in">
+        {Screen ? <Screen /> : <StartShow onStarted={() => setStarted(true)} />}
+      </div>
+      <DebugOverlay />
     </div>
   )
 }

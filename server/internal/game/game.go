@@ -12,6 +12,9 @@ import (
 // soon as the conductor's phone sends calibrated.
 type Timings struct {
 	Compose, Calibrate, Perform, Vote time.Duration
+	// MaxRounds caps the rounds in a game (0 = one per player). The first
+	// MaxRounds players in join order conduct. For the demo, e.g. 2.
+	MaxRounds int
 	// ReplayClip is how long the TV replays each performance during the vote.
 	// The vote lasts at least one clip per performance (plus a short pad), and
 	// everyone voting early doesn't cut the replays off.
@@ -150,6 +153,9 @@ func (r *Room) startGame() error {
 	}
 	if len(r.order) == 0 {
 		return fmt.Errorf("need at least one player to start")
+	}
+	if r.timings.MaxRounds > 0 && len(r.order) > r.timings.MaxRounds {
+		r.order = r.order[:r.timings.MaxRounds]
 	}
 	for n := 1; len(r.players) < protocol.MinPlayers; n++ {
 		seat := r.freeSeat()

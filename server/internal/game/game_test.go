@@ -377,3 +377,28 @@ func TestVoteWaitsForReplays(t *testing.T) {
 		t.Fatal("no results after the replays")
 	}
 }
+
+func TestMaxRounds(t *testing.T) {
+	r := newTestRoom()
+	r.timings.MaxRounds = 2
+	tv := joinTV(r)
+	joinPlayer(r, "A")
+	joinPlayer(r, "B")
+	joinPlayer(r, "C")
+	host(r, tv, protocol.HostStart)
+	if s := tv.state(t); s.TotalRounds != 2 || s.Conductor != 1 {
+		t.Fatalf("start: %+v", s)
+	}
+	for range 3 { // round 1: compose, calibrate, perform
+		r.onDeadline()
+	}
+	if s := tv.state(t); s.Round != 2 || s.Conductor != 2 {
+		t.Fatalf("round 2: round %d conductor %d", s.Round, s.Conductor)
+	}
+	for range 3 {
+		r.onDeadline()
+	}
+	if s := tv.state(t); s.Phase != protocol.PhaseVote || len(s.Performances) != 2 {
+		t.Fatalf("expected the vote after 2 rounds: %+v", s.Phase)
+	}
+}

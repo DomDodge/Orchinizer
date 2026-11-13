@@ -14,14 +14,6 @@ import { partNotes, STEPS_PER_BEAT } from './part.js'
 
 if (import.meta.env.DEV) window.Tone = Tone // for poking at the Transport from devtools
 
-// The server's instruments (see /protocol INSTRUMENT_GROUPS) mapped onto our synth voices.
-const VOICE = {
-  contrabass: 'bass', cello: 'bass', viola: 'pad', violin: 'lead', harp: 'lead', guitar: 'lead',
-  flute: 'lead', clarinet: 'lead', sax: 'lead', trumpet: 'lead', trombone: 'bass', tuba: 'bass',
-  drums: 'drums', timpani: 'drums', xylophone: 'lead', bongos: 'drums',
-  piano: 'lead', organ: 'pad', synth: 'pad',
-}
-const voiceFor = (instrument) => instruments[VOICE[instrument] || instrument] || instruments.lead
 
 const T = Tone.getTransport()
 const Draw = Tone.getDraw()
@@ -115,7 +107,7 @@ function load(p) {
     const { loopSteps, notes } = partNotes(pl.pattern)
     const insts = {}
     for (const name of new Set([pl.instrument, ...notes.map((n) => n.instrument || pl.instrument)])) {
-      insts[name] = voiceFor(name)(master, { key: p.key })
+      insts[name] = instruments.create(name, master, { key: p.key })
     }
 
     // One event per step that has notes on it.
@@ -125,7 +117,7 @@ function load(p) {
     const part = new Tone.Part((time, ev) => {
       if (!isOn(pl.seat, Math.round(T.getTicksAtTime(time)))) return
       for (const n of ev.notes) {
-        const dur = n.fromGrid ? undefined : Tone.Ticks(n.length * ticksPerStep).toSeconds()
+        const dur = Tone.Ticks(n.length * ticksPerStep).toSeconds()
         insts[n.instrument || pl.instrument].play(n.row, time, dur)
       }
       Draw.schedule(() => store.bumpHit(pl.seat), time)
