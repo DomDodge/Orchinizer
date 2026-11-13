@@ -179,7 +179,8 @@ func (b *bot) session(ctx context.Context) error {
 // act reacts to state changes: compose, conduct, vote.
 func (b *bot) act(ctx context.Context, c *conn, states <-chan protocol.State) {
 	var cancelConduct context.CancelFunc = func() {}
-	defer func() { cancelConduct() }()
+	var cancelCompose context.CancelFunc = func() {}
+	defer func() { cancelConduct(); cancelCompose() }()
 	lastPhase, lastRound, conducting, sentPattern := "", -1, false, false
 	voted := map[int]bool{}
 
@@ -202,13 +203,18 @@ func (b *bot) act(ctx context.Context, c *conn, states <-chan protocol.State) {
 			log.Printf("phase %s round %d/%d conductor %d key %s tempo %d", s.Phase, s.Round, s.TotalRounds, s.Conductor, s.Key, s.Tempo)
 		}
 		lastPhase, lastRound = s.Phase, s.Round
+		if phaseChanged {
+			cancelCompose() // stop tweaking: patterns lock when compose ends
+		}
 
 		amConductor := s.Conductor == b.seat || (s.Conductor == 0 && *conduct == b.idx)
 
 		// Compose: a fresh random pattern each round (and once in the lobby).
 		if s.Conductor != b.seat && (!sentPattern || (phaseChanged && s.Phase == protocol.PhaseCompose)) {
 			sentPattern = true
-			go b.compose(ctx, c, s.Instruments)
+			pctx, pc := context.WithCancel(ctx)
+			cancelCompose = pc
+			go b.compose(pctx, c, s.Instruments)
 		}
 
 		// Calibrate: pretend to point at each seat, then report.

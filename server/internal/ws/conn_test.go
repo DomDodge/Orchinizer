@@ -64,7 +64,7 @@ func (c *client) expect(typ string, v any) {
 
 func setup(t *testing.T) string {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(Handler(game.NewRegistry(log), log))
+	srv := httptest.NewServer(Handler(game.NewRegistry(log, game.DefaultTimings), log))
 	t.Cleanup(srv.Close)
 	return "ws" + strings.TrimPrefix(srv.URL, "http")
 }

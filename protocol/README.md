@@ -57,4 +57,13 @@
 
 `lobby` → for each round: `compose` (60 s) → `calibrate` (ends when `calibrated` arrives, 30 s cap) → `perform` (45 s) → … → `vote` (30 s) → `results`
 
-The conductor sits out compose. Phones should show the "You're conducting!" screen when `state.conductor` matches their seat.
+- **Start** (`host_action: start`): seats still disconnected are removed, and bots fill up to 4 seats. The conductor order is every real player in seat order, so there's one round per player. Bots never conduct or vote.
+- **Each round:** a new `key` and `tempo`, and instruments are dealt again so there's a mix. The conductor's `instrument` is `""`, and they sit compose out. Phones should show the "You're conducting!" screen when `state.conductor` matches their seat.
+- **Compose:** patterns are accepted in the lobby (for testing) and during compose. When compose ends they lock, and an empty pattern gets a default. The TV then gets `patterns` with `locked: true`.
+- **Calibrate:** the conductor may send `select` and `calibrated`. `calibrated` starts perform right away.
+- **Perform:** the conductor may send `select`, `cue` and `volume`. The TV's `cue_scheduled` messages make up the replay log.
+- **A conductor who is disconnected when their round starts is skipped.**
+- **Vote:** the TV gets `performances` (everything needed for replays). You can't vote for a round you conducted. You can change your vote; the last one counts. The vote ends early once everyone eligible has voted. `state.performances` holds the live counts.
+- **Results:** `state.winner` is the winning round, and a tie goes to the earlier round. The game stays here until `next` or `restart`, which go back to the lobby with the same players.
+- **Host actions:** `next` ends the current phase now. `skip` jumps to the vote, keeping the performance in progress (with no performances it goes back to the lobby). `restart` goes back to the lobby from anywhere.
+- **Stale conductor messages:** `select` and `volume` from a non-conductor, or in the wrong phase, are dropped silently, because they stream and some always arrive just after a phase change. `cue` and `calibrated` get an `error`.

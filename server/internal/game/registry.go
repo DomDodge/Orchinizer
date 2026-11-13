@@ -15,13 +15,14 @@ const MaxRooms = 200
 // Registry maps room codes to rooms. It is the only state shared between
 // goroutines, so it is the only thing behind a mutex.
 type Registry struct {
-	mu    sync.Mutex
-	rooms map[string]*Room
-	log   *slog.Logger
+	mu      sync.Mutex
+	rooms   map[string]*Room
+	log     *slog.Logger
+	timings Timings
 }
 
-func NewRegistry(log *slog.Logger) *Registry {
-	return &Registry{rooms: map[string]*Room{}, log: log}
+func NewRegistry(log *slog.Logger, t Timings) *Registry {
+	return &Registry{rooms: map[string]*Room{}, log: log, timings: t}
 }
 
 // Create starts a new room with a unique code, or returns nil if the
@@ -44,7 +45,7 @@ func (r *Registry) Create() *Room {
 			break
 		}
 	}
-	room := newRoom(code, r, r.log.With("room", code))
+	room := newRoom(code, r, r.log.With("room", code), r.timings)
 	r.rooms[code] = room
 	go room.run()
 	r.log.Info("room created", "room", code, "rooms", len(r.rooms))

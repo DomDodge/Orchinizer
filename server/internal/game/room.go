@@ -44,44 +44,56 @@ type player struct {
 	name       string
 	color      string
 	token      string
-	client     Client // nil when disconnected (or a bot)
+	client     Client // nil when disconnected (always nil for bots)
 	bot        bool
 	instrument string
 	steps      protocol.Grid
 	noteCount  int
 	playing    bool
-	voted      bool
+	vote       int // round voted for, 0 = none
 }
 
+func (p *player) connected() bool { return p.bot || p.client != nil }
+
 // Room owns all of one room's state. Only its run goroutine touches the
-// fields below inbox; everything else talks to it through Post.
+// fields below done; everything else talks to it through the Post methods.
 type Room struct {
-	code  string
-	reg   *Registry
-	log   *slog.Logger
-	inbox chan event
-	done  chan struct{}
+	code    string
+	reg     *Registry
+	log     *slog.Logger
+	timings Timings
+	inbox   chan event
+	done    chan struct{}
 
 	tv      Client
 	tvToken string
 	players map[int]*player // by seat
 
-	phase       string
-	round       int
-	totalRounds int
-	conductor   int
-	deadline    time.Time
-	key         string
-	tempo       int
-	group       string
-	cueLog      []protocol.LoggedCue
+	phase     string
+	deadline  time.Time
+	timer     *time.Timer // fires at deadline; nil when the phase has none
+	key       string
+	tempo     int
+	group     string
+	locked    bool // patterns are locked (compose is over)
+	conductor int
+
+	// The game: conductors in order (fixed at start), the round in
+	// progress, and finished performances.
+	order        []int
+	round        int // 1-based; 0 in the lobby
+	keys         []keyTempo
+	cueLog       []protocol.LoggedCue
+	performances []protocol.Performance
+	winner       int
 }
 
-func newRoom(code string, reg *Registry, log *slog.Logger) *Room {
+func newRoom(code string, reg *Registry, log *slog.Logger, t Timings) *Room {
 	return &Room{
 		code:    code,
 		reg:     reg,
 		log:     log,
+		timings: t,
 		inbox:   make(chan event, 256),
 		done:    make(chan struct{}),
 		players: map[int]*player{},
@@ -117,16 +129,21 @@ func (r *Room) run() {
 	defer idle.Stop()
 	lastActive := time.Now()
 	for {
+		var deadline <-chan time.Time
+		if r.timer != nil {
+			deadline = r.timer.C
+		}
 		select {
 		case e := <-r.inbox:
 			r.handle(e)
-			if r.connectedCount() > 0 {
-				lastActive = time.Now()
-			}
+		case <-deadline:
+			r.timer = nil
+			r.onDeadline()
 		case <-idle.C:
 			if r.connectedCount() > 0 {
 				lastActive = time.Now()
 			} else if time.Since(lastActive) > idleTimeout {
+				r.stopTimer()
 				r.reg.remove(r.code)
 				close(r.done)
 				return
@@ -168,8 +185,12 @@ func (r *Room) onJoin(c Client, j protocol.Join) {
 		}
 		r.sendTo(c, protocol.Welcome{Envelope: r.env(protocol.TypeWelcome), Role: protocol.RoleTV, Token: r.tvToken})
 		r.log.Info("tv joined")
+		// Catch the TV up: state, the patterns, and replays if we're voting.
 		r.broadcastState()
-		r.sendPatterns(false)
+		r.sendPatterns()
+		if r.phase == protocol.PhaseVote || r.phase == protocol.PhaseResults {
+			r.sendPerformances()
+		}
 
 	case protocol.RolePlayer:
 		if p := r.playerByToken(j.Token); p != nil {
@@ -252,150 +273,9 @@ func (r *Room) onLeave(c Client) {
 	p.client = nil
 	r.log.Info("player disconnected", "seat", p.seat, "name", p.name, "phase", r.phase)
 	r.broadcastState()
-}
-
-// ---- messages ----
-
-func (r *Room) onMessage(c Client, typ string, raw []byte) {
-	isTV := c == r.tv
-	p := r.playerByClient(c)
-	if !isTV && p == nil {
-		return // not joined (or replaced by a reconnect)
+	if r.phase == protocol.PhaseVote {
+		r.maybeEndVote()
 	}
-
-	switch typ {
-	case protocol.TypePattern:
-		if p == nil {
-			r.reject(c, "only players send patterns")
-			return
-		}
-		if p.seat == r.conductor {
-			r.reject(c, "the conductor doesn't compose")
-			return
-		}
-		var m protocol.Pattern
-		if !r.decode(c, raw, &m) {
-			return
-		}
-		if m.Instrument != "" {
-			if !contains(protocol.InstrumentGroups[r.group], m.Instrument) {
-				r.reject(c, "instrument not in this round's group")
-				return
-			}
-			p.instrument = m.Instrument
-		}
-		p.steps = m.Steps
-		p.noteCount = countNotes(m.Steps)
-		r.broadcastState()
-		r.sendPatterns(false)
-
-	case protocol.TypeSelect, protocol.TypeCue, protocol.TypeVolume, protocol.TypeCalibrated:
-		if !r.isConductor(p) {
-			r.reject(c, "only the conductor sends "+typ)
-			return
-		}
-		r.relayConductor(c, typ, raw)
-
-	case protocol.TypeCueScheduled:
-		if !isTV {
-			r.reject(c, "only the tv sends cue_scheduled")
-			return
-		}
-		var m protocol.CueScheduled
-		if !r.decode(c, raw, &m) {
-			return
-		}
-		if r.players[m.Seat] == nil || !validAction(m.Action) {
-			r.reject(c, "cue_scheduled needs an existing seat and action in/out")
-			return
-		}
-		r.cueLog = append(r.cueLog, protocol.LoggedCue{ID: m.ID, Seat: m.Seat, Action: m.Action, Beat: m.Beat})
-		r.players[m.Seat].playing = m.Action == protocol.CueIn
-		r.broadcastState()
-
-	case protocol.TypeBar:
-		if !isTV {
-			r.reject(c, "only the tv sends bar")
-			return
-		}
-		var m protocol.Bar
-		if !r.decode(c, raw, &m) {
-			return
-		}
-		m.Envelope = r.env(protocol.TypeBar)
-		r.broadcastPlayers(m)
-
-	case protocol.TypeHostAction:
-		if !isTV {
-			r.reject(c, "only the tv sends host_action")
-			return
-		}
-		r.reject(c, "host_action is not implemented yet")
-
-	case protocol.TypeVote:
-		r.reject(c, "vote is not implemented yet")
-
-	case protocol.TypeJoin:
-		r.reject(c, "already joined")
-
-	default:
-		r.reject(c, "unknown message type "+typ)
-	}
-}
-
-// isConductor: while no conductor is set (the lobby during development),
-// any player may send conductor messages, so cues can be tested early.
-func (r *Room) isConductor(p *player) bool {
-	if p == nil {
-		return false
-	}
-	return r.conductor == 0 || p.seat == r.conductor
-}
-
-// relayConductor validates a conductor message, then forwards it to the TV.
-func (r *Room) relayConductor(c Client, typ string, raw []byte) {
-	var out any
-	switch typ {
-	case protocol.TypeSelect:
-		var m protocol.Select
-		if !r.decode(c, raw, &m) {
-			return
-		}
-		if m.Seat != 0 && r.players[m.Seat] == nil {
-			r.reject(c, "no such seat")
-			return
-		}
-		out = m
-	case protocol.TypeCue:
-		var m protocol.Cue
-		if !r.decode(c, raw, &m) {
-			return
-		}
-		if r.players[m.Seat] == nil || !validAction(m.Action) {
-			r.reject(c, "cue needs an existing seat and action in/out")
-			return
-		}
-		out = m
-	case protocol.TypeVolume:
-		var m protocol.Volume
-		if !r.decode(c, raw, &m) {
-			return
-		}
-		if r.players[m.Seat] == nil {
-			r.reject(c, "no such seat")
-			return
-		}
-		m.Level = max(0, min(100, m.Level))
-		out = m
-	case protocol.TypeCalibrated:
-		var m protocol.Calibrated
-		if !r.decode(c, raw, &m) {
-			return
-		}
-		out = m
-	}
-	// Re-encode so the TV only ever sees validated fields and the right room.
-	r.sendTo(r.tv, withEnvelope(out, r.env(typ)))
 }
 
 // ---- outgoing ----
@@ -409,13 +289,14 @@ func (r *Room) state() protocol.State {
 		Envelope:    r.env(protocol.TypeState),
 		Phase:       r.phase,
 		Round:       r.round,
-		TotalRounds: r.totalRounds,
+		TotalRounds: len(r.order),
 		Conductor:   r.conductor,
 		Key:         r.key,
 		Scale:       protocol.ScaleMajorPentatonic,
 		Tempo:       r.tempo,
 		Instruments: protocol.InstrumentGroups[r.group],
 		Players:     []protocol.PlayerState{},
+		Winner:      r.winner,
 	}
 	if !r.deadline.IsZero() {
 		s.Deadline = r.deadline.UnixMilli()
@@ -423,32 +304,47 @@ func (r *Room) state() protocol.State {
 	for _, p := range r.seatOrder() {
 		s.Players = append(s.Players, protocol.PlayerState{
 			Seat: p.seat, Name: p.name, Color: p.color, Instrument: p.instrument,
-			Connected: p.bot || p.client != nil, Bot: p.bot,
-			NoteCount: p.noteCount, Playing: p.playing, Voted: p.voted,
+			Connected: p.connected(), Bot: p.bot,
+			NoteCount: p.noteCount, Playing: p.playing, Voted: p.vote != 0,
 		})
+	}
+	if r.phase == protocol.PhaseVote || r.phase == protocol.PhaseResults {
+		s.Performances = r.summaries()
 	}
 	return s
 }
 
 func (r *Room) broadcastState() { r.broadcastAll(r.state()) }
 
-// sendPatterns sends every non-conductor part to the TV.
-func (r *Room) sendPatterns(locked bool) {
-	if r.tv == nil {
-		return
-	}
-	m := protocol.Patterns{
-		Envelope: r.env(protocol.TypePatterns),
-		Round:    r.round, Key: r.key, Tempo: r.tempo, Locked: locked,
-		Parts: []protocol.Part{},
-	}
+// currentParts is every non-conductor seat's pattern, in seat order.
+func (r *Room) currentParts() []protocol.Part {
+	parts := []protocol.Part{}
 	for _, p := range r.seatOrder() {
 		if p.seat == r.conductor {
 			continue
 		}
-		m.Parts = append(m.Parts, protocol.Part{Seat: p.seat, Instrument: p.instrument, Steps: p.steps})
+		parts = append(parts, protocol.Part{Seat: p.seat, Instrument: p.instrument, Steps: p.steps})
 	}
-	r.sendTo(r.tv, m)
+	return parts
+}
+
+// sendPatterns sends the TV every part for the current round.
+func (r *Room) sendPatterns() {
+	if r.tv == nil {
+		return
+	}
+	r.sendTo(r.tv, protocol.Patterns{
+		Envelope: r.env(protocol.TypePatterns),
+		Round:    r.round, Key: r.key, Tempo: r.tempo, Locked: r.locked,
+		Parts: r.currentParts(),
+	})
+}
+
+func (r *Room) sendPerformances() {
+	if r.tv == nil {
+		return
+	}
+	r.sendTo(r.tv, protocol.Performances{Envelope: r.env(protocol.TypePerformances), List: r.performances})
 }
 
 func (r *Room) broadcastAll(v any) {
@@ -522,21 +418,11 @@ func (r *Room) freeSeat() int {
 // firstDisconnected returns the lowest disconnected human seat, or nil.
 func (r *Room) firstDisconnected() *player {
 	for _, p := range r.seatOrder() {
-		if !p.bot && p.client == nil {
+		if !p.connected() {
 			return p
 		}
 	}
 	return nil
-}
-
-// removeDisconnected drops every disconnected human seat. Called when the
-// host starts the game.
-func (r *Room) removeDisconnected() {
-	for seat, p := range r.players {
-		if !p.bot && p.client == nil {
-			delete(r.players, seat)
-		}
-	}
 }
 
 func (r *Room) playerByToken(tok string) *player {
@@ -585,8 +471,6 @@ func countNotes(g protocol.Grid) int {
 	return n
 }
 
-func validAction(a string) bool { return a == protocol.CueIn || a == protocol.CueOut }
-
 func contains(list []string, s string) bool {
 	for _, x := range list {
 		if x == s {
@@ -595,6 +479,8 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+func validAction(a string) bool { return a == protocol.CueIn || a == protocol.CueOut }
 
 func newToken() string {
 	b := make([]byte, 16)
@@ -608,23 +494,4 @@ func mustJSON(v any) []byte {
 		panic(err) // only our own structs get here
 	}
 	return b
-}
-
-// withEnvelope sets the envelope on a relayed conductor message.
-func withEnvelope(v any, e protocol.Envelope) any {
-	switch m := v.(type) {
-	case protocol.Select:
-		m.Envelope = e
-		return m
-	case protocol.Cue:
-		m.Envelope = e
-		return m
-	case protocol.Volume:
-		m.Envelope = e
-		return m
-	case protocol.Calibrated:
-		m.Envelope = e
-		return m
-	}
-	return v
 }
