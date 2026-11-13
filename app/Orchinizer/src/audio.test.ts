@@ -60,7 +60,7 @@ test('the generated sounds cover every instrument with the expected sample count
   }
 });
 
-test('every instrument previews all its rows in every round key, tuned by a small rate', () => {
+test('every instrument previews all its rows in every round key, never changing the playback rate', () => {
   const { api, played } = load();
   for (const id of ALL) {
     const rows = KITS.includes(id) ? 3 : 5;
@@ -70,13 +70,13 @@ test('every instrument previews all its rows in every round key, tuned by a smal
     }
   }
   for (const p of played) {
-    assert.ok(p.rate >= 1 && p.rate < 2 ** (SAMPLE_STEP / 12), `${p.source} rate ${p.rate}`);
-    assert.equal(p.correctPitch, false);
+    // Setting a non-integer playbackRate hangs the app on iOS, so previews leave it alone.
+    assert.equal(p.rate, 1, `${p.source} rate ${p.rate}`);
   }
   // Violin in B, top row: semitone 11 + 9 = 20, the top sample untransposed.
   const { api: a2, played: p2 } = load();
   a2.playNote('violin', 'B', 4);
-  assert.deepEqual(p2[0], { source: 'violin_20', rate: 1, correctPitch: false });
+  assert.deepEqual(p2[0], { source: 'violin_20', rate: 1, correctPitch: true });
   // Violin in D, row 1: semitone 2 + 2 = 4, the second sample.
   a2.playNote('violin', 'D', 1);
   assert.equal(p2[1].source, 'violin_4');
