@@ -28,7 +28,9 @@ function createSocket(url) {
     ws.onopen = () => {
       retry = 0
       setConnection('open')
-      ws.send(JSON.stringify({ type: 'join', room: getState().room, role: 'tv' }))
+      // No room yet: the server creates one. Reconnecting: the token keeps this tab as the TV.
+      const { room, token } = getState()
+      ws.send(JSON.stringify({ type: 'join', role: 'tv', ...(room && { room }), ...(token && { token }) }))
       while (queue.length) ws.send(queue.shift())
     }
     ws.onmessage = (e) => {

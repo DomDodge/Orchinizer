@@ -7,6 +7,8 @@
 let state = {
   connection: 'idle', // idle | connecting | open | reconnecting
   room: null,
+  token: null, // from welcome; proves this tab is the room's TV when reconnecting
+  error: null, // last server error { message, at }
   game: null,
   selected: null, // seat the conductor is pointing at
   volumes: {}, // seat -> 0..100
@@ -49,21 +51,56 @@ export function on(type, fn) {
 
 // ---- server messages ----
 
+// Converts the server's `state` (see /protocol) into the shape the screens use:
+//   players[].pattern = { instrument, grid } once patterns lock (calibrate/perform), else null
+//   history = finished performances [{ round, conductor, conductorName, key, tempo }]
+//   deadline = moved onto this machine's clock using serverTime, so a wrong TV clock doesn't matter
+function fromServerState(msg, prev) {
+  const locked = msg.phase === 'calibrate' || msg.phase === 'perform'
+  const patterns = msg.patterns || {}
+  const players = (msg.players || []).map((p) => ({
+    ...p,
+    pattern: locked && p.seat !== msg.conductor && patterns[p.seat] ? { instrument: p.instrument, grid: patterns[p.seat] } : null,
+  }))
+  const history = (msg.performances || []).map((pf) => ({
+    round: pf.round,
+    conductor: pf.conductorSeat,
+    conductorName: pf.conductorName,
+    key: pf.key,
+    tempo: pf.tempo,
+  }))
+  // Keep the converted deadline stable while the server's deadline is unchanged, so countdown
+  // effects don't restart on every state message.
+  let deadline = null
+  if (msg.deadline) {
+    deadline =
+      prev && prev.rawDeadline === msg.deadline ? prev.deadline : msg.deadline - (msg.serverTime || Date.now()) + Date.now()
+  }
+  return { ...msg, players, history, deadline, rawDeadline: msg.deadline }
+}
+
 export function handle(msg) {
   const patch = { messages: [{ at: Date.now(), msg }, ...state.messages].slice(0, 10) }
   if (msg.room) patch.room = msg.room
 
   switch (msg.type) {
+    case 'welcome':
+      patch.token = msg.token // sent again on reconnect so this tab keeps the TV slot
+      break
+    case 'error':
+      patch.error = { message: msg.message, at: Date.now() }
+      break
     case 'state': {
-      patch.game = msg
-      patch.selected = null
+      const game = fromServerState(msg, state.game)
+      patch.game = game
       if (msg.phase !== state.game?.phase) {
         patch.phaseStartedAt = Date.now()
-        patch.calibrated = msg.calibrated || []
+        patch.calibrated = []
+        patch.selected = null
         if (msg.phase === 'perform') Object.assign(patch, { playing: {}, volumes: {}, lastCue: null })
-        if (msg.phase === 'compose') patch.noteCounts = {}
       }
-      if (msg.votes) patch.votes = msg.votes
+      patch.noteCounts = Object.fromEntries(game.players.map((p) => [p.seat, p.noteCount || 0]))
+      patch.votes = Object.fromEntries((msg.performances || []).map((pf) => [pf.round, pf.votes]))
       break
     }
     case 'select':
@@ -72,19 +109,20 @@ export function handle(msg) {
     case 'volume':
       patch.volumes = { ...state.volumes, [msg.seat]: msg.level }
       break
-    case 'calibrated':
-      patch.calibrated = msg.seats
+    case 'calibrated': {
+      // Sent once, when calibration is done; seats come from the angle map's keys.
+      const seats = Object.keys(msg.angles || {}).map(Number)
+      patch.calibrated = seats.length
+        ? seats
+        : (state.game?.players || []).filter((p) => p.seat !== state.game?.conductor).map((p) => p.seat)
       break
-    case 'compose_progress':
-      patch.noteCounts = { ...state.noteCounts, [msg.seat]: msg.notes }
-      break
-    case 'votes':
-      patch.votes = msg.votes
-      break
+    }
   }
 
   set(patch)
-  listeners[msg.type]?.forEach((fn) => fn(msg))
+  // State listeners (the audio engine) get the converted game, like the screens do.
+  const payload = msg.type === 'state' ? state.game : msg
+  listeners[msg.type]?.forEach((fn) => fn(payload))
 }
 
 // ---- local updates (connection, audio engine) ----

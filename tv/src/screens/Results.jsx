@@ -78,10 +78,10 @@ export default function Results() {
         </div>
 
         <div className="results-actions">
-          <button className="btn" onClick={() => hostAction('start')}>
+          <button className="btn" onClick={() => (hostAction('restart'), hostAction('start'))}>
             Play again
           </button>
-          <button className="btn btn-ghost" onClick={() => hostAction('next')}>
+          <button className="btn btn-ghost" onClick={() => hostAction('restart')}>
             Back to lobby
           </button>
         </div>

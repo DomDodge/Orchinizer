@@ -3,20 +3,48 @@ import QRCode from 'qrcode'
 import { useGameState } from '../state/useGameState.js'
 import { hostAction } from '../net/socket.js'
 import { setMuted } from '../audio/engine.js'
-import { JOIN_URL } from '../config.js'
+import { HTTP_URL, JOIN_URL_FALLBACK, JOIN_URL_OVERRIDE, MOCK } from '../config.js'
 import Stage from '../stage/Stage.jsx'
 import Icon from './Icon.jsx'
 import './screens.css'
 
-const MIN_PLAYERS = 4
+// The server fills empty seats with bots up to 4, so one player is enough to start.
+const MIN_PLAYERS = 1
+const BOT_FILL = 4
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '')
 
 function statusLine(count) {
-  if (count < MIN_PLAYERS) {
-    const need = MIN_PLAYERS - count
-    return `Waiting for ${need} more player${need === 1 ? '' : 's'}`
+  if (count < MIN_PLAYERS) return 'Waiting for players'
+  if (count < BOT_FILL) {
+    const bots = BOT_FILL - count
+    return `Ready. Bots will fill ${bots} seat${bots === 1 ? '' : 's'}.`
   }
   return count < 8 ? 'Ready when you are. More can still join.' : 'Full house.'
+}
+
+// The QR target: an override if given, else the server's EXPO_URL from GET /config.
+function useJoinUrl() {
+  const [url, setUrl] = useState(JOIN_URL_OVERRIDE || JOIN_URL_FALLBACK)
+  useEffect(() => {
+    if (JOIN_URL_OVERRIDE || MOCK) return
+    fetch(`${HTTP_URL}/config`)
+      .then((r) => r.json())
+      .then((c) => c.expoUrl && setUrl(c.expoUrl))
+      .catch(() => {})
+  }, [])
+  return url
+}
+
+// A server error (e.g. Start refused) shows in place of the status line for a few seconds.
+function useRecentError() {
+  const error = useGameState((s) => s.error)
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (!error) return
+    const id = setTimeout(() => tick((n) => n + 1), 6000)
+    return () => clearTimeout(id)
+  }, [error])
+  return error && Date.now() - error.at < 6000 ? error.message : null
 }
 
 export default function Lobby() {
@@ -24,10 +52,12 @@ export default function Lobby() {
   const room = useGameState((s) => s.room)
   const muted = useGameState((s) => s.muted)
 
+  const joinUrl = useJoinUrl()
+  const error = useRecentError()
   const [qr, setQr] = useState('')
   useEffect(() => {
-    QRCode.toString(JOIN_URL, { type: 'svg', margin: 1, color: { dark: '#0D0E17', light: '#F4F1EA' } }).then(setQr)
-  }, [])
+    QRCode.toString(joinUrl, { type: 'svg', margin: 1, color: { dark: '#0D0E17', light: '#F4F1EA' } }).then(setQr)
+  }, [joinUrl])
 
   const seats = Array.from({ length: 8 }, (_, i) => {
     const p = players.find((pl) => pl.seat === i + 1)
@@ -69,7 +99,7 @@ export default function Lobby() {
       <div className="lobby-footer">
         <div className="lobby-count">
           <span className="num">{count} / 8</span>
-          <span className="lobby-status">{statusLine(count)}</span>
+          <span className="lobby-status">{error || statusLine(count)}</span>
         </div>
         <div className="lobby-actions">
           <button className="chip lobby-sound" onClick={() => setMuted(!muted)}>

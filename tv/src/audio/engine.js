@@ -13,6 +13,15 @@ import * as instruments from './instruments.js' // only via play / setVolume / d
 
 if (import.meta.env.DEV) window.Tone = Tone // for poking at the Transport from devtools
 
+// The server's instruments (see /protocol INSTRUMENT_GROUPS) mapped onto our synth voices.
+const VOICE = {
+  contrabass: 'bass', cello: 'bass', viola: 'pad', violin: 'lead', harp: 'lead', guitar: 'lead',
+  flute: 'lead', clarinet: 'lead', sax: 'lead', trumpet: 'lead', trombone: 'bass', tuba: 'bass',
+  drums: 'drums', timpani: 'drums', xylophone: 'lead', bongos: 'drums',
+  piano: 'lead', organ: 'pad', synth: 'pad',
+}
+const voiceFor = (instrument) => instruments[VOICE[instrument] || instrument] || instruments.lead
+
 const T = Tone.getTransport()
 const Draw = Tone.getDraw()
 
@@ -99,8 +108,7 @@ function load(p) {
   T.position = 0
 
   for (const pl of p.players) {
-    const make = instruments[pl.instrument] || instruments.lead
-    const inst = make(master, { key: p.key })
+    const inst = voiceFor(pl.instrument)(master, { key: p.key })
 
     // One event per step that has any lit rows. Step n is n eighth notes into the bar.
     const steps = []
@@ -175,7 +183,7 @@ store.on('cue', (msg) => {
   const e = { tick, beat: tick / T.PPQ, seat: msg.seat, type: 'cue', action: msg.action, id: msg.id }
   insertEvent(e)
   scheduleEvent(e)
-  send('cue_scheduled', { id: msg.id, beat: e.beat })
+  send('cue_scheduled', { id: msg.id, seat: msg.seat, action: msg.action, beat: e.beat })
   console.log(`[audio] cue #${msg.id} seat ${msg.seat} ${msg.action} at beat ${(T.ticks / T.PPQ).toFixed(2)} -> beat ${e.beat}`)
 })
 
@@ -188,6 +196,26 @@ store.on('volume', (msg) => {
 })
 
 // ---- replays ----
+
+// The server sends every performance (patterns + cue log) when the vote starts. Normally we
+// recorded them ourselves; this fills in any we missed, e.g. after the TV page reloaded.
+store.on('performances', (msg) => {
+  const have = store.getState().performances
+  for (const sp of msg.list || []) {
+    if (have[sp.round]) continue
+    const ppq = T.PPQ
+    const events = (sp.cues || []).map((c) => ({ tick: c.beat * ppq, beat: c.beat, seat: c.seat, type: 'cue', action: c.action, id: c.id }))
+    const lastBeat = events.length ? events[events.length - 1].beat : 0
+    store.savePerformance({
+      round: sp.round,
+      tempo: sp.tempo,
+      key: sp.key,
+      players: (sp.parts || []).map((pt) => ({ seat: pt.seat, instrument: pt.instrument, pattern: { instrument: pt.instrument, grid: pt.steps } })),
+      events,
+      endTick: (lastBeat + 16) * ppq, // the log has no end marker; play 4 bars past the last cue
+    })
+  }
+})
 
 // Picks the `seconds`-long window (starting on a bar line) with the most parts playing.
 export function bestClip(p, seconds = 10) {

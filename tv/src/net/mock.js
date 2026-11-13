@@ -1,33 +1,34 @@
 // Fake server for ?mock=1. Same interface as the real socket: we get `send(msg)`,
-// and it calls `deliver(msg)` with server messages. Steps through every phase
-// with 6 fake players and random patterns.
+// and it calls `deliver(msg)` with server messages shaped like /protocol (the real
+// server's messages). Steps through every phase with 6 fake players and random patterns.
 import { setConnection } from '../state/store.js'
 import { MOCK_SPEED, SEAT_COLORS } from '../config.js'
 
 const NAMES = ['Maya', 'Theo', 'Priya', 'Jonas', 'Lena', 'Kofi']
-const INSTRUMENTS = ['bass', 'pad', 'lead', 'drums']
-const KEYS = ['C', 'D', 'E', 'G', 'A']
+const INSTRUMENTS = ['contrabass', 'cello', 'viola', 'violin', 'harp', 'drums']
+const KEYS = [['C', 96], ['G', 104], ['F', 88], ['D', 112], ['A', 100], ['Bb', 108]]
 const ROUNDS = Number(new URLSearchParams(location.search).get('rounds')) || 3
 
 // Base phase lengths in ms (scaled by ?speed=).
-const LEN = { compose: 12000, calibrate: 7000, perform: 32000, next_round: 3000, votePerRound: 10000 }
+const LEN = { compose: 12000, calibrate: 7000, perform: 32000, votePerRound: 10000 }
 
 const rand = (n) => Math.floor(Math.random() * n)
 const pick = (a) => a[rand(a.length)]
 
-function randomPattern(instrument) {
+function randomGrid(instrument) {
   const rows = instrument === 'drums' ? 3 : 5 // drums: kick, snare, hat
   const grid = Array.from({ length: 5 }, (_, r) =>
-    Array.from({ length: 8 }, () => r < rows && Math.random() < (instrument === 'pad' ? 0.12 : 0.25)),
+    Array.from({ length: 8 }, () => r < rows && Math.random() < 0.25),
   )
   if (instrument === 'drums') grid[0][0] = grid[0][4] = true // keep a pulse
-  return { instrument, grid }
+  return grid
 }
 
 export function createMockServer(deliver) {
-  const room = Array.from({ length: 4 }, () => String.fromCharCode(65 + rand(26))).join('')
+  const room = Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[rand(24)]).join('')
   let players = []
-  let s = {} // phase, round, conductor, key, tempo, deadline, history, votes, winner
+  let patterns = {} // seat -> grid
+  let s = {} // phase, round, conductor, key, tempo, deadline, performances, winner
   let timers = []
   let cueId = 0
   let nextPhase = null // what 'next'/'skip' (or the timer) moves to
@@ -40,71 +41,86 @@ export function createMockServer(deliver) {
   }
   // Round-trip through JSON like a real socket, so no message shares objects with mock state.
   const emit = (type, data) => deliver(JSON.parse(JSON.stringify({ type, room, ...data })))
-  const pushState = () => emit('state', { ...s, players })
+  const pushState = () =>
+    emit('state', {
+      phase: s.phase,
+      round: s.round || 0,
+      totalRounds: s.round ? ROUNDS : 0,
+      conductor: s.conductor || 0,
+      deadline: s.deadline || 0,
+      serverTime: Date.now(),
+      key: s.key || 'C',
+      scale: 'major_pentatonic',
+      tempo: s.tempo || 100,
+      players,
+      patterns,
+      performances: s.performances || [],
+      winner: s.winner || 0,
+    })
   const phase = (name, len, extra = {}) => {
     clear()
-    Object.assign(s, { phase: name, deadline: len ? Date.now() + len * MOCK_SPEED : null }, extra)
+    Object.assign(s, { phase: name, deadline: len ? Date.now() + len * MOCK_SPEED : 0 }, extra)
     pushState()
   }
   const conductorFor = (round) => players[(round - 1) % players.length].seat
   const performers = () => players.filter((p) => p.seat !== s.conductor)
 
   function lobby() {
-    s = { history: [], votes: {} }
+    s = { performances: [] }
+    patterns = {}
     nextPhase = null
     phase('lobby')
     if (players.length) return
     NAMES.forEach((name, i) =>
       later(700 * (i + 1), () => {
-        players.push({ seat: i + 1, name, color: SEAT_COLORS[i], instrument: INSTRUMENTS[i % 4], pattern: null })
+        players.push({
+          seat: i + 1, name, color: SEAT_COLORS[i], instrument: INSTRUMENTS[i],
+          connected: true, bot: false, noteCount: 0, playing: false, voted: false,
+        })
         pushState()
       }),
     )
   }
 
   function compose(round) {
-    const key = pick(KEYS)
-    const tempo = 90 + rand(31)
-    players.forEach((p) => (p.pattern = null))
+    const [key, tempo] = pick(KEYS)
+    patterns = {}
+    players.forEach((p) => (p.noteCount = 0))
     phase('compose', LEN.compose, { round, conductor: conductorFor(round), key, tempo })
-    // Patterns are decided now but only counts leak out until compose ends.
-    const hidden = Object.fromEntries(performers().map((p) => [p.seat, randomPattern(p.instrument)]))
-    const counts = {}
+    // Patterns are decided now; the TV only shows note counts until compose ends.
+    const hidden = Object.fromEntries(performers().map((p) => [p.seat, randomGrid(p.instrument)]))
     every(400, () => {
       const p = pick(performers())
-      const total = hidden[p.seat].grid.flat().filter(Boolean).length
-      counts[p.seat] = Math.min(total, (counts[p.seat] || 0) + 1)
-      emit('compose_progress', { seat: p.seat, notes: counts[p.seat] })
+      const total = hidden[p.seat].flat().filter(Boolean).length
+      p.noteCount = Math.min(total, p.noteCount + 1)
+      pushState()
     })
     nextPhase = () => {
-      performers().forEach((p) => (p.pattern = hidden[p.seat]))
+      patterns = hidden
       calibrate()
     }
     later(LEN.compose, nextPhase)
   }
 
   function calibrate() {
-    phase('calibrate', LEN.calibrate, { calibrated: [] })
+    phase('calibrate', LEN.calibrate)
     const seats = performers().map((p) => p.seat)
-    const done = []
-    seats.forEach((seat, i) =>
-      later((LEN.calibrate / (seats.length + 1)) * (i + 1), () => {
-        emit('select', { seat })
-        done.push(seat)
-        emit('calibrated', { seats: [...done] })
-      }),
-    )
-    nextPhase = perform
-    later(LEN.calibrate, perform)
+    seats.forEach((seat, i) => later((LEN.calibrate / (seats.length + 1)) * (i + 1), () => emit('select', { seat })))
+    // Like the real server: one calibrated message, then perform right away.
+    nextPhase = () => {
+      emit('calibrated', { angles: Object.fromEntries(seats.map((seat, i) => [seat, i * 25])) })
+      perform()
+    }
+    later(LEN.calibrate, nextPhase)
   }
 
   function perform() {
-    phase('perform', LEN.perform, { calibrated: undefined })
+    phase('perform', LEN.perform)
     const seats = performers().map((p) => p.seat)
     const playing = new Set()
     const cue = (seat, action) => {
       action === 'in' ? playing.add(seat) : playing.delete(seat)
-      emit('cue', { id: ++cueId, seat, action })
+      emit('cue', { id: `m${++cueId}`, seat, action })
     }
     later(500, () => cue(seats[0], 'in'))
     later(900, () => cue(seats[1], 'in'))
@@ -123,52 +139,42 @@ export function createMockServer(deliver) {
       cue(seat, playing.has(seat) && playing.size > 1 ? 'out' : 'in')
     })
     nextPhase = () => {
-      s.history.push({ round: s.round, conductor: s.conductor, key: s.key, tempo: s.tempo })
-      s.round < ROUNDS ? nextRound() : vote()
+      const c = players.find((p) => p.seat === s.conductor)
+      s.performances.push({ round: s.round, conductorSeat: s.conductor, conductorName: c?.name || '', key: s.key, tempo: s.tempo, votes: 0 })
+      s.round < ROUNDS ? compose(s.round + 1) : vote()
     }
     later(LEN.perform, nextPhase)
   }
 
-  function nextRound() {
-    const round = s.round + 1
-    phase('next_round', LEN.next_round, { round, conductor: conductorFor(round), key: pick(KEYS), tempo: 90 + rand(31) })
-    nextPhase = () => compose(round)
-    later(LEN.next_round, nextPhase)
-  }
-
   function vote() {
     // Not shortened by ?speed=: replay clips always take a real 10 s each.
-    const len = (LEN.votePerRound * s.history.length + 5000) / MOCK_SPEED
-    phase('vote', len, { votes: Object.fromEntries(s.history.map((h) => [h.round, 0])) })
+    const len = (LEN.votePerRound * s.performances.length + 5000) / MOCK_SPEED
+    phase('vote', len, { conductor: 0 })
     every(1500, () => {
-      const r = pick(s.history).round
-      s.votes = { ...s.votes, [r]: s.votes[r] + 1 }
-      emit('votes', { votes: s.votes })
+      pick(s.performances).votes++
+      pushState()
     })
     nextPhase = results
     later(len, results)
   }
 
   function results() {
-    const winner = s.history.reduce((a, b) => (s.votes[b.round] > s.votes[a.round] ? b : a)).round
+    const winner = s.performances.reduce((a, b) => (b.votes > a.votes ? b : a)).round
     phase('results', null, { winner })
     nextPhase = lobby
   }
 
   // Returning "connected" right away mirrors the real socket's onopen + join.
   setConnection('open')
+  emit('welcome', { role: 'tv', seat: 0, token: 'mock' })
   lobby()
 
   return {
     send(msg) {
       if (msg.type !== 'host_action') return
-      if (msg.action === 'start' && (s.phase === 'lobby' || s.phase === 'results')) {
-        s.history = []
-        s.votes = {}
-        compose(1)
-      } else if ((msg.action === 'next' || msg.action === 'skip') && nextPhase) {
-        nextPhase()
-      }
+      if (msg.action === 'restart') lobby()
+      else if (msg.action === 'start' && s.phase === 'lobby') compose(1)
+      else if ((msg.action === 'next' || msg.action === 'skip') && nextPhase) nextPhase()
     },
   }
 }
