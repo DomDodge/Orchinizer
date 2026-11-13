@@ -53,7 +53,7 @@ export function playNote(inst: Voice, key: string, row: number) {
   }
   const p = player(src);
   p.shouldCorrectPitch = false;
-  p.playbackRate = inst !== 'drums' && keyRoot(key) + SCALE[row] >= 19 ? 2 : 1;
+  p.setPlaybackRate(inst !== 'drums' && keyRoot(key) + SCALE[row] >= 19 ? 2 : 1);
   p.seekTo(0);
   p.play();
 }

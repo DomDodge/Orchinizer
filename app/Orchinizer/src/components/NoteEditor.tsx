@@ -8,7 +8,6 @@ import {
   useCompetingGestures,
   useLongPressGesture,
   usePanGesture,
-  useTapGesture,
 } from 'react-native-gesture-handler';
 import { LOOP_STEPS, MAX_NOTES, ROWS, STEPS_PER_BEAT, type Note } from '../../../../protocol/messages.ts';
 import { fits, move, place, remove, resize } from '../notes';
@@ -53,20 +52,15 @@ export function NoteEditor({ notes, onChange, color, keyName, disabled = false, 
     if (next !== notes) onChange(next);
   };
 
-  const tap = useTapGesture({
-    runOnJS: true,
-    enabled: !disabled && width > 0,
-    onActivate: (e) => {
-      const start = offset + Math.floor(e.x / cellW);
-      const row = rows - 1 - Math.floor(e.y / ROW_H); // top row = highest note
-      if (full) return void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      const next = place(notes, row, start, newId());
-      if (!next) return;
-      Haptics.selectionAsync();
-      onChange(next);
-      onPlace?.(next[next.length - 1]);
-    },
-  });
+  const addNote = (row: number, start: number) => {
+    if (disabled) return;
+    if (full) return void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+    const next = place(notes, row, start, newId());
+    if (!next) return;
+    onChange(next);
+    onPlace?.(next[next.length - 1]);
+    void Haptics.selectionAsync().catch(() => {});
+  };
 
   return (
     <View style={styles.wrap}>
@@ -90,37 +84,40 @@ export function NoteEditor({ notes, onChange, color, keyName, disabled = false, 
           ))}
         </View>
 
-        <GestureDetector gesture={tap}>
-          <View style={[styles.grid, { height: ROW_H * rows }]} onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
-            {/* Background: rows, with every beat shaded so notes are easy to line up. */}
-            {Array.from({ length: rows }, (_, i) => (
-              <View key={i} style={[styles.row, i % 2 === 1 && styles.rowAlt]}>
-                {Array.from({ length: BAR_STEPS }, (_, s) => (
-                  <View key={s} style={[styles.step, s % STEPS_PER_BEAT === 0 && styles.beat]} />
-                ))}
-              </View>
-            ))}
-            {width > 0 &&
-              notes
-                .filter((n) => n.start < offset + BAR_STEPS && n.start + n.length > offset)
-                .map((n) => (
-                  <NoteView
-                    key={n.id}
-                    note={n}
-                    notes={notes}
-                    cellW={cellW}
-                    offset={offset}
-                    color={color}
-                    disabled={disabled}
-                    commit={commit}
-                    rows={rows}
-                  />
-                ))}
-            {width > 0 && playhead >= offset && playhead < offset + BAR_STEPS && (
-              <View pointerEvents="none" style={[styles.playhead, { left: (playhead - offset) * cellW }]} />
-            )}
-          </View>
-        </GestureDetector>
+        <View style={[styles.grid, { height: ROW_H * rows }]} onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
+          {/* Background: rows, with every beat shaded so notes are easy to line up. */}
+          {Array.from({ length: rows }, (_, i) => (
+            <View key={i} style={[styles.row, i % 2 === 1 && styles.rowAlt]}>
+              {Array.from({ length: BAR_STEPS }, (_, s) => (
+                <Pressable key={s}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Add ${rowLabels?.[rows - 1 - i] ?? noteName(keyName, rows - 1 - i)}, bar ${bar + 1}, step ${s + 1}`}
+                  disabled={disabled}
+                  onPress={() => addNote(rows - 1 - i, offset + s)}
+                  style={[styles.step, s % STEPS_PER_BEAT === 0 && styles.beat]} />
+              ))}
+            </View>
+          ))}
+          {width > 0 &&
+            notes
+              .filter((n) => n.start < offset + BAR_STEPS && n.start + n.length > offset)
+              .map((n) => (
+                <NoteView
+                  key={n.id}
+                  note={n}
+                  notes={notes}
+                  cellW={cellW}
+                  offset={offset}
+                  color={color}
+                  disabled={disabled}
+                  commit={commit}
+                  rows={rows}
+                />
+              ))}
+          {width > 0 && playhead >= offset && playhead < offset + BAR_STEPS && (
+            <View pointerEvents="none" style={[styles.playhead, { left: (playhead - offset) * cellW }]} />
+          )}
+        </View>
       </View>
 
       <Text style={styles.hint}>Tap to add · drag to move · drag the right edge to stretch · hold to delete</Text>

@@ -22,7 +22,9 @@ test('every round key can preview all five rows, including high Bb notes', () =>
       assert.equal(name, 'expo-audio');
       return { createAudioPlayer: (source: string) => {
         assert.ok(source, 'must resolve a bundled sound');
-        return { playbackRate: 1, shouldCorrectPitch: true, seekTo() {}, play() {
+        let rate = 1;
+        // Expo Go's native player exposes a getter; rates change through the method.
+        return { get playbackRate() { return rate; }, setPlaybackRate(next: number) { rate = next; }, shouldCorrectPitch: true, seekTo() {}, play() {
           played.push({ source, rate: this.playbackRate, correctPitch: this.shouldCorrectPitch });
         } };
       } };
@@ -50,7 +52,7 @@ test('playNoteFor stops a stretched note after its length, and a replay cancels 
       if (name === './protocol') return { keyRoot, SCALE };
       if (name === './sounds.gen') return { SOUNDS: sounds };
       return { createAudioPlayer: (source: string) => ({
-        playbackRate: 1, shouldCorrectPitch: true, seekTo() {},
+        get playbackRate() { return 1; }, setPlaybackRate() {}, shouldCorrectPitch: true, seekTo() {},
         play() { log.push(`play ${source}`); }, pause() { log.push(`stop ${source}`); },
       }) };
     },
