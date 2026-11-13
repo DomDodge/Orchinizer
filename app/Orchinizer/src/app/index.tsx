@@ -1,6 +1,7 @@
 import { useKeepAwake } from 'expo-keep-awake';
 import { Compose, ConductorWaiting } from '../components/Compose';
-import { Calibrate, Perform } from '../components/Conductor';
+import { Calibrate } from '../components/Calibration';
+import { Perform } from '../components/Conductor';
 import { Join } from '../components/Join';
 import { Lobby } from '../components/Lobby';
 import { HoldUp, Playing, Results, Vote } from '../components/Player';

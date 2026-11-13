@@ -19,6 +19,8 @@ The phone imports the shared TypeScript contract from `../../protocol/messages.t
 4. Once the TV is attached and everyone has picked, tap **Start game** on the host phone. Bots fill up to four seats for small test groups.
 5. Compose, calibrate, perform, and vote. The host can tap **Back to lobby** after results.
 
+During calibration, stay in one spot and point at the named player, then tap **Save direction**. Tap a saved player to redo their direction. After everyone is recorded, sweep the room to check the names and tap **Start performing**. Virtual players need separate imagined spots. Choose **Start with buttons** if motion is unavailable; if the setup timer expires before confirmation, performing also uses button controls.
+
 Disconnected phones retain their seat and part using the server's reconnect token for the current app session. **Leave** or a host kick frees the seat and instrument. A removed offline client stops reconnecting when its token is rejected. Reloading the app starts a new session.
 
 Frontend checks:

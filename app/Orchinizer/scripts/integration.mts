@@ -43,10 +43,10 @@ test('phone lobby → token reconnect → two conductor rounds → voting → re
           } };
         },
       });
-      const wait = (predicate: (snap: any) => boolean) => new Promise<any>((resolve, reject) => {
+      const wait = (predicate: (snap: any) => boolean, timeout = 5000) => new Promise<any>((resolve, reject) => {
         let timer: ReturnType<typeof setTimeout>;
         const check = () => { const snap = api.useNet(); if (predicate(snap)) { clearTimeout(timer); changes.off('change', check); resolve(snap); } };
-        timer = setTimeout(() => { changes.off('change', check); reject(new Error(`Waiting for ${name}: ${JSON.stringify(api.useNet())}`)); }, 5000);
+        timer = setTimeout(() => { changes.off('change', check); reject(new Error(`Waiting for ${name}: ${JSON.stringify(api.useNet())}`)); }, timeout);
         changes.on('change', check); check();
       });
       api.useNet(); api.connect(name, room);
@@ -96,7 +96,8 @@ test('phone lobby → token reconnect → two conductor rounds → voting → re
     next(); await host.wait(s => s.state.phase === 'vote'); await guest.wait(s => s.state.phase === 'vote');
     assert.equal(host.api.useNet().state.performances.length, 2);
     host.api.send({ type: 'vote', round: 2 }); guest.api.send({ type: 'vote', round: 1 });
-    await host.wait(s => s.state.phase === 'results'); assert.equal(host.api.useNet().state.winner, 1);
+    // The TV replays both performances before the server closes voting (25 seconds).
+    await host.wait(s => s.state.phase === 'results', 35000); assert.equal(host.api.useNet().state.winner, 1);
     host.api.send({ type: 'host_action', action: 'restart' }); await host.wait(s => s.state.phase === 'lobby' && s.state.players.length === 2);
     const online = phone('Online', room); await online.wait(s => !!s.state);
     host.api.send({ type: 'kick', seat: online.api.useNet().seat }); await online.wait(s => !s.state && s.error === 'You were removed from the room');
