@@ -116,6 +116,18 @@ func (r *Room) onHostAction(c Client, action string) {
 // bots, fixes the conductor order (every real player, in seat order), and
 // starts round 1.
 func (r *Room) startGame() error {
+	if r.tv == nil {
+		return fmt.Errorf("Connect the TV screen before starting")
+	}
+	for _, p := range r.players {
+		if !p.bot && p.connected() && p.pick == "" {
+			return fmt.Errorf("%s needs to pick an instrument", p.name)
+		}
+	}
+	if len(r.instruments()) < protocol.MinPlayers-1 {
+		return fmt.Errorf("Enable more instruments before starting")
+	}
+
 	for seat, p := range r.players {
 		if !p.connected() {
 			delete(r.players, seat)
@@ -132,12 +144,15 @@ func (r *Room) startGame() error {
 	}
 	for n := 1; len(r.players) < protocol.MinPlayers; n++ {
 		seat := r.freeSeat()
+		r.sequence++
 		r.players[seat] = &player{
-			seat:  seat,
-			name:  fmt.Sprintf("Bot %d", n),
-			color: protocol.SeatColors[seat-1],
-			token: newToken(),
-			bot:   true,
+			seat:   seat,
+			joined: r.sequence,
+			level:  80,
+			name:   fmt.Sprintf("Bot %d", n),
+			color:  protocol.SeatColors[seat-1],
+			token:  newToken(),
+			bot:    true,
 		}
 	}
 	r.keys = make([]keyTempo, len(roundKeys))
@@ -173,25 +188,36 @@ func (r *Room) startCompose(conductor int) {
 	kt := r.keys[(r.round-1)%len(r.keys)]
 	r.key, r.tempo = kt.key, kt.tempo
 
-	// Deal instruments so each round has a mix, rotating seats each round,
-	// and clear last round's patterns.
-	inst := protocol.InstrumentGroups[r.group]
-	i := r.round
+	// Human picks persist. Bots fill unclaimed active instruments each round.
+	used := map[string]bool{}
 	for _, p := range r.seatOrder() {
-		p.playing = false
-		p.steps = protocol.Grid{}
-		p.noteCount = 0
-		if p.seat == conductor {
-			p.instrument = ""
-			continue
+		p.playing, p.level = false, 80
+		p.steps, p.noteCount = protocol.Grid{}, 0
+		if !p.bot {
+			p.instrument = p.pick
+			if p.seat == conductor {
+				p.instrument = ""
+			} else {
+				used[p.instrument] = true
+			}
 		}
-		p.instrument = inst[i%len(inst)]
-		i++
+	}
+	for _, p := range r.seatOrder() {
 		if p.bot {
+			for _, inst := range r.instruments() {
+				if !used[inst] {
+					p.instrument = inst
+					used[inst] = true
+					break
+				}
+			}
 			p.steps = botPattern(p.instrument)
 			p.noteCount = countNotes(p.steps)
 		}
 	}
+	r.pending = map[string]protocol.Cue{}
+	r.lastSelect, r.lastVolume = time.Time{}, time.Time{}
+
 	r.setDeadline(r.timings.Compose)
 	r.log.Info("compose", "round", r.round, "conductor", conductor, "key", r.key, "tempo", r.tempo)
 	r.broadcastState()
@@ -317,7 +343,6 @@ func (r *Room) startResults() {
 // toLobby resets the game, keeping the human players.
 func (r *Room) toLobby() {
 	r.stopTimer()
-	inst := protocol.InstrumentGroups[r.group]
 	for seat, p := range r.players {
 		if p.bot {
 			delete(r.players, seat)
@@ -325,9 +350,11 @@ func (r *Room) toLobby() {
 		}
 		p.vote, p.playing = 0, false
 		p.steps, p.noteCount = protocol.Grid{}, 0
-		p.instrument = inst[(seat-1)%len(inst)]
+		p.instrument = p.pick
+		p.level = 80
 	}
 	r.phase = protocol.PhaseLobby
+	r.pending = map[string]protocol.Cue{}
 	r.round, r.conductor, r.order = 0, 0, nil
 	r.locked = false
 	r.key, r.tempo = "C", 100
@@ -348,7 +375,7 @@ func (r *Room) summaries() []protocol.PerformanceSummary {
 		}
 		out = append(out, protocol.PerformanceSummary{
 			Round: perf.Round, ConductorSeat: perf.ConductorSeat,
-			ConductorName: perf.ConductorName, Votes: votes,
+			ConductorName: perf.ConductorName, Key: perf.Key, Tempo: perf.Tempo, Votes: votes,
 		})
 	}
 	return out
@@ -400,7 +427,10 @@ func defaultPattern(instrument string) protocol.Grid {
 	if ps := presets[instrument]; len(ps) > 0 {
 		return ps[0]
 	}
-	return grid("x...x...", "........", "........", "........", "........")
+	if instrument == "drums" || instrument == "timpani" || instrument == "bongos" {
+		return grid("x...x...", "..x...x.", "x.x.x.x.")
+	}
+	return grid("x...x...", "..x...x.", "....x...", "......x.", "........")
 }
 
 // botPattern is a random preset for the instrument.

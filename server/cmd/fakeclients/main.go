@@ -207,14 +207,22 @@ func (b *bot) act(ctx context.Context, c *conn, states <-chan protocol.State) {
 			cancelCompose() // stop tweaking: patterns lock when compose ends
 		}
 
+		if s.Phase == protocol.PhaseLobby {
+			for _, p := range s.Players {
+				if p.Seat == b.seat && p.Instrument == "" && len(s.Instruments) > 0 {
+					inst := s.Instruments[(b.seat-1)%len(s.Instruments)]
+					c.send(protocol.Pick{Envelope: env(protocol.TypePick, b.room), Instrument: &inst})
+				}
+			}
+		}
 		amConductor := s.Conductor == b.seat || (s.Conductor == 0 && *conduct == b.idx)
 
-		// Compose: a fresh random pattern each round (and once in the lobby).
-		if s.Conductor != b.seat && (!sentPattern || (phaseChanged && s.Phase == protocol.PhaseCompose)) {
+		// Compose: a fresh random pattern each round, keeping the lobby pick.
+		if s.Conductor != b.seat && s.Phase == protocol.PhaseCompose && (!sentPattern || phaseChanged) {
 			sentPattern = true
 			pctx, pc := context.WithCancel(ctx)
 			cancelCompose = pc
-			go b.compose(pctx, c, s.Instruments)
+			go b.compose(pctx, c)
 		}
 
 		// Calibrate: pretend to point at each seat, then report.
@@ -255,11 +263,8 @@ func (b *bot) act(ctx context.Context, c *conn, states <-chan protocol.State) {
 }
 
 // compose sends a random pattern, then tweaks it a few times like a person would.
-func (b *bot) compose(ctx context.Context, c *conn, instruments []string) {
+func (b *bot) compose(ctx context.Context, c *conn) {
 	inst := ""
-	if len(instruments) > 0 && rand.IntN(3) == 0 {
-		inst = instruments[rand.IntN(len(instruments))] // sometimes re-pick
-	}
 	g := randomGrid()
 	c.send(protocol.Pattern{Envelope: env(protocol.TypePattern, b.room), Instrument: inst, Steps: g})
 	for range 3 + rand.IntN(4) {
@@ -401,7 +406,7 @@ func (t *tv) run(ctx context.Context) {
 			t.mu.Lock()
 			t.state = s
 			t.mu.Unlock()
-			if *start > 0 && !started && s.Phase == protocol.PhaseLobby && len(s.Players) >= *start {
+			if *start > 0 && !started && s.Phase == protocol.PhaseLobby && len(s.Players) >= *start && allPicked(s.Players) {
 				started = true
 				log.Printf("[tv] %d players in, sending host start", len(s.Players))
 				t.c.send(protocol.HostAction{Envelope: env(protocol.TypeHostAction, t.room), Action: protocol.HostStart})
@@ -460,4 +465,13 @@ func sleep(ctx context.Context, d time.Duration) bool {
 	case <-ctx.Done():
 		return false
 	}
+}
+
+func allPicked(players []protocol.PlayerState) bool {
+	for _, p := range players {
+		if p.Instrument == "" {
+			return false
+		}
+	}
+	return true
 }

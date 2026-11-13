@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { clearError, leave, send, useNet } from '../net';
+import { clearError, leave, send, useNet, SERVER_URL } from '../net';
 import { ALL_CATEGORIES, CATEGORIES, INSTRUMENTS, instrumentInfo, type Category, type Player, type State } from '../protocol';
 import { BG, Btn, DIM, FG, P, Screen } from './ui';
 
 export function Lobby({ state, me }: { state: State; me: Player }) {
   const { error } = useNet();
-  const conducting = state.conductor === me.seat;
+  const conducting = state.host === me.seat;
   const [confirmKick, setConfirmKick] = useState(0); // seat waiting for a 2nd tap
   const takenBy = new Map(state.players.filter((p) => p.instrument).map((p) => [p.instrument, p]));
 
@@ -34,7 +34,7 @@ export function Lobby({ state, me }: { state: State; me: Player }) {
 
         <Section title={`Band · ${state.players.length}/8`}>
           {state.players.map((p, i) => (
-            <View key={p.seat} style={[styles.member, { borderColor: p.color, opacity: p.online ? 1 : 0.4 }]}>
+            <View key={p.seat} style={[styles.member, { borderColor: p.color, opacity: p.connected ? 1 : 0.4 }]}>
               <Text style={[styles.seat, { color: p.color }]}>{p.seat}</Text>
               <View style={{ flex: 1 }}>
                 <Text style={styles.name}>
@@ -43,7 +43,7 @@ export function Lobby({ state, me }: { state: State; me: Player }) {
                 </Text>
                 <Text style={styles.role}>
                   {roleText(p, state)} · conducts {ordinal(i + 1)}
-                  {p.online ? '' : ' · offline'}
+                  {p.connected ? '' : ' · offline'}
                 </Text>
               </View>
               {conducting && p.seat !== me.seat && (
@@ -112,7 +112,12 @@ export function Lobby({ state, me }: { state: State; me: Player }) {
         </Section>
 
         {error && <P color="#FF5252">{error}</P>}
-        <P>Waiting for the game to start…</P>
+        <P>{state.tvConnected ? 'TV connected · ready for sound' : 'Connect the TV screen to hear the orchestra.'}</P>
+        {!state.tvConnected && <P>Open {SERVER_URL.replace(/^ws/, 'http').replace(/\/ws\/?$/, '/')} on the TV and enter room {state.room}.</P>}
+        {conducting ? (
+          <Btn label="Start game" disabled={!state.tvConnected || state.players.some((p) => p.connected && !p.bot && !p.instrument)} onPress={() => send({ type: 'host_action', action: 'start' })} />
+        ) : <P>Waiting for the host to start…</P>}
+        {conducting && state.players.some((p) => p.connected && !p.instrument) && <P>Everyone needs to pick an instrument first, including you.</P>}
       </ScrollView>
     </Screen>
   );

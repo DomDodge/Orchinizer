@@ -80,7 +80,7 @@ export function Compose({ state, me }: { state: State; me: Player }) {
 export function ConductorWaiting({ state }: { state: State }) {
   const left = useSecondsLeft(state.deadline);
   const band = state.players.filter((p) => p.instrument && p.seat !== state.conductor);
-  const ready = band.filter((p) => p.notes > 0).length;
+  const ready = band.filter((p) => p.noteCount > 0).length;
   const total = band.length;
   return (
     <Screen style={{ justifyContent: 'center' }}>

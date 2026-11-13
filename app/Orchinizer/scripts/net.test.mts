@@ -41,8 +41,8 @@ function client(serverUrl = 'ws://localhost:8080/ws') {
 
 test('kicked client returns home, keeps the removal message and never retries', () => {
   const { net, socket, retries } = client();
-  socket.receive({ type: 'welcome', room: 'ABCD', seat: 2 });
-  socket.receive({ type: 'state', serverNow: Date.now(), players: [] });
+  socket.receive({ type: 'welcome', room: 'ABCD', seat: 2, token: 'seat-token' });
+  socket.receive({ type: 'state', serverTime: Date.now(), players: [] });
   socket.receive({ type: 'kicked' });
   socket.onclose();
   const snap = net.useNet();
@@ -56,7 +56,7 @@ test('kicked client returns home, keeps the removal message and never retries', 
 
 test('leaving intentionally does not show a server connection error', () => {
   const { net, socket, retries } = client();
-  socket.receive({ type: 'state', serverNow: Date.now(), players: [] });
+  socket.receive({ type: 'state', serverTime: Date.now(), players: [] });
   net.leave();
   socket.onclose();
   assert.equal(net.useNet().error, null);
@@ -73,14 +73,16 @@ test('failed initial connection still explains the failure', () => {
 
 test('unintentional disconnect after joining still reconnects to the same room', () => {
   const { net, socket, retries, sockets } = client();
-  socket.receive({ type: 'welcome', room: 'ABCD', seat: 2 });
-  socket.receive({ type: 'state', serverNow: Date.now(), players: [] });
+  socket.receive({ type: 'welcome', room: 'ABCD', seat: 2, token: 'seat-token' });
+  socket.receive({ type: 'state', serverTime: Date.now(), players: [] });
   socket.onclose();
   assert.equal(net.useNet().connected, false);
   assert.equal(retries.length, 1);
   retries[0]();
   sockets[1].onopen();
-  assert.equal((sockets[1].sent[0] as { room: string }).room, 'ABCD');
+  const rejoin = sockets[1].sent[0] as { room: string; token: string };
+  assert.equal(rejoin.room, 'ABCD');
+  assert.equal(rejoin.token, 'seat-token');
 });
 
 test('missing server configuration shows an error without opening a connection', () => {
@@ -88,4 +90,22 @@ test('missing server configuration shows an error without opening a connection',
   assert.equal(sockets.length, 0);
   assert.equal(net.useNet().joining, false);
   assert.equal(net.useNet().error, 'The game server is not configured yet.');
+});
+
+test('a rejected reconnect clears the old room and stops retrying', () => {
+ const { net, socket, retries, sockets } = client();
+ socket.receive({ type: 'welcome', room: 'ABCD', seat: 2, token: 'old-token' });
+ socket.receive({ type: 'state', serverTime: Date.now(), players: [] });
+ socket.onclose(); retries.shift()!(); sockets[1].onopen();
+ sockets[1].receive({ type: 'error', code: 'not_allowed', message: 'Seat removed' });
+ sockets[1].onclose();
+ assert.equal(net.useNet().state, null);
+ assert.equal(net.useNet().error, 'Seat removed');
+ assert.equal(retries.length, 0);
+});
+test('serverTime drives countdowns using the shared protocol', () => {
+ const { net, socket } = client();
+ const time = Date.now()+30000;
+ socket.receive({ type: 'state', serverTime: time, players: [] });
+ assert.ok(Math.abs(net.serverNow()-time)<1000);
 });

@@ -5,6 +5,11 @@ package protocol
 
 // Message types.
 const (
+	TypeCategories   = "categories"
+	TypePick         = "pick"
+	TypeLeave        = "leave"
+	TypeKick         = "kick"
+	TypeKicked       = "kicked"
 	TypeJoin         = "join"          // any client -> server
 	TypeWelcome      = "welcome"       // server -> the client that joined
 	TypeError        = "error"         // server -> one client
@@ -41,8 +46,9 @@ const (
 
 // Cue actions.
 const (
-	CueIn  = "in"
-	CueOut = "out"
+	CueIn     = "in"
+	CueOut    = "out"
+	CueAllOut = "all_out"
 )
 
 // Host actions.
@@ -80,7 +86,7 @@ type Envelope struct {
 
 // Join: the first message on every connection.
 //   - TV with no room: creates a room. The code comes back in Welcome.
-//   - Player: room and name are required.
+//   - Player without room hosts; with room joins. Name is required for a new seat.
 //   - Token (optional): reconnect and take back your seat or TV slot.
 type Join struct {
 	Envelope
@@ -116,7 +122,7 @@ type PlayerState struct {
 	Seat       int    `json:"seat"` // 1-based
 	Name       string `json:"name"`
 	Color      string `json:"color"`
-	Instrument string `json:"instrument"` // dealt at join; a pattern message can change it
+	Instrument string `json:"instrument"` // picked in lobby; empty while conducting
 	Connected  bool   `json:"connected"`
 	Bot        bool   `json:"bot"`
 	NoteCount  int    `json:"noteCount"` // for the TV's compose tiles
@@ -129,6 +135,8 @@ type PerformanceSummary struct {
 	Round         int    `json:"round"`
 	ConductorSeat int    `json:"conductorSeat"`
 	ConductorName string `json:"conductorName"`
+	Key           string `json:"key"`
+	Tempo         int    `json:"tempo"`
 	Votes         int    `json:"votes"`
 }
 
@@ -148,13 +156,18 @@ type State struct {
 	Players     []PlayerState `json:"players"`
 	// Filled in during the vote and results phases.
 	Performances []PerformanceSummary `json:"performances"`
+	Host         int                  `json:"host"`
+	TVConnected  bool                 `json:"tvConnected"`
+	Categories   []string             `json:"categories"`
+	Patterns     map[int]Grid         `json:"patterns"`
+	Live         map[int]int          `json:"live"`
 	Winner       int                  `json:"winner"` // winning round, 0 = none yet
 }
 
 // Pattern: a player's part. Send it on every change during compose.
 type Pattern struct {
 	Envelope
-	Instrument string `json:"instrument"`
+	Instrument string `json:"instrument,omitempty"`
 	Steps      Grid   `json:"steps"`
 }
 
@@ -265,3 +278,19 @@ type Performances struct {
 type Config struct {
 	ExpoURL string `json:"expoUrl"` // e.g. exp://abc-anonymous-8081.exp.direct; "" if not set
 }
+
+// Lobby controls. Picks are unique across all human seats, including offline ones.
+type Categories struct {
+	Envelope
+	Categories []string `json:"categories"`
+}
+type Pick struct {
+	Envelope
+	Instrument *string `json:"instrument"`
+}
+type Leave struct{ Envelope }
+type Kick struct {
+	Envelope
+	Seat int `json:"seat"`
+}
+type Kicked struct{ Envelope }
