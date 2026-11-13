@@ -1,7 +1,9 @@
-// Owns musical time. Every locked pattern is a looping one-bar Tone.Part on the
-// Transport. Cues land on the next beat; all music-tied visuals go through Tone.Draw.
+// Owns musical time. Every locked pattern is a looping Tone.Part on the Transport: a note-editor
+// part loops over 2 bars of 16ths, an old grid part over 1 bar of 8ths. Cues land on the next
+// beat; all music-tied visuals go through Tone.Draw.
 //
 // A performance is { round, tempo, key, players: [{ seat, instrument, pattern }], events, endTick }.
+// pattern = { instrument, grid, notes? }. When `notes` has any, they're played and the grid is ignored.
 // `events` is the replay log, sorted by tick:
 //   { tick, beat, seat, type: 'cue', action: 'in' | 'out', id }
 //   { tick, beat, seat, type: 'volume', level }
@@ -13,14 +15,8 @@ import * as instruments from './instruments.js' // only via play / setVolume / d
 
 if (import.meta.env.DEV) window.Tone = Tone // for poking at the Transport from devtools
 
-// The server's instruments (see /protocol INSTRUMENT_GROUPS) mapped onto our synth voices.
-const VOICE = {
-  contrabass: 'bass', cello: 'bass', viola: 'pad', violin: 'lead', harp: 'lead', guitar: 'lead',
-  flute: 'lead', clarinet: 'lead', sax: 'lead', trumpet: 'lead', trombone: 'bass', tuba: 'bass',
-  drums: 'drums', timpani: 'drums', xylophone: 'lead', bongos: 'drums',
-  piano: 'lead', organ: 'pad', synth: 'pad',
-}
-const voiceFor = (instrument) => instruments[VOICE[instrument] || instrument] || instruments.lead
+// Note-editor timing (see /protocol): a part is LOOP_STEPS 16th-note steps.
+const LOOP_STEPS = 32
 
 const T = Tone.getTransport()
 const Draw = Tone.getDraw()
@@ -108,21 +104,15 @@ function load(p) {
   T.position = 0
 
   for (const pl of p.players) {
-    const inst = voiceFor(pl.instrument)(master, { key: p.key })
-
-    // One event per step that has any lit rows. Step n is n eighth notes into the bar.
-    const steps = []
-    for (let step = 0; step < 8; step++) {
-      const rows = [0, 1, 2, 3, 4].filter((r) => pl.pattern.grid[r]?.[step])
-      if (rows.length) steps.push({ time: `0:${Math.floor(step / 2)}:${(step % 2) * 2}`, rows, step })
-    }
+    const inst = instruments.create(pl.instrument, master, { key: p.key })
+    const { events, loopEnd } = partEvents(pl.pattern)
     const part = new Tone.Part((time, ev) => {
       if (!isOn(pl.seat, Math.round(T.getTicksAtTime(time)))) return
-      ev.rows.forEach((row) => inst.play(row, time))
+      ev.rows.forEach((row) => inst.play(row, time, ev.duration))
       Draw.schedule(() => store.bumpHit(pl.seat), time)
-    }, steps)
+    }, events)
     part.loop = true
-    part.loopEnd = '1m'
+    part.loopEnd = loopEnd
     part.start(0)
     voices[pl.seat] = { inst, part }
   }
@@ -137,6 +127,29 @@ function load(p) {
   }, '4n', 0)
 
   p.events.forEach(scheduleEvent)
+}
+
+// The Part events for one pattern. Call after T.bpm is set: durations are in seconds.
+function partEvents(pattern) {
+  const sixteenth = T.PPQ / 4 // ticks
+  if (pattern.notes?.length) {
+    return {
+      events: pattern.notes.map((n) => ({
+        time: `${n.start * sixteenth}i`,
+        rows: [n.row],
+        duration: Tone.Ticks(n.length * sixteenth).toSeconds(),
+      })),
+      loopEnd: `${LOOP_STEPS * sixteenth}i`,
+    }
+  }
+  // Old grid: one event per step that has any lit rows. Step n is n eighth notes into the bar.
+  const eighth = Tone.Time('8n').toSeconds()
+  const events = []
+  for (let step = 0; step < 8; step++) {
+    const rows = [0, 1, 2, 3, 4].filter((r) => pattern.grid?.[r]?.[step])
+    if (rows.length) events.push({ time: `0:${Math.floor(step / 2)}:${(step % 2) * 2}`, rows, duration: eighth })
+  }
+  return { events, loopEnd: '1m' }
 }
 
 function teardown() {
@@ -210,7 +223,11 @@ store.on('performances', (msg) => {
       round: sp.round,
       tempo: sp.tempo,
       key: sp.key,
-      players: (sp.parts || []).map((pt) => ({ seat: pt.seat, instrument: pt.instrument, pattern: { instrument: pt.instrument, grid: pt.steps } })),
+      players: (sp.parts || []).map((pt) => ({
+        seat: pt.seat,
+        instrument: pt.instrument,
+        pattern: { instrument: pt.instrument, grid: pt.steps, notes: pt.notes },
+      })),
       events,
       endTick: (lastBeat + 16) * ppq, // the log has no end marker; play 4 bars past the last cue
     })

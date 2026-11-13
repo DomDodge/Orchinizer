@@ -1,5 +1,6 @@
 // Note lanes above each performing seat, drawn on a canvas. Notes fall at a constant 56px
-// per eighth note and touch the seat at the exact moment the TV plays them.
+// per eighth note and touch the seat at the exact moment the TV plays them. Grid parts are
+// dots; note-editor parts are bars as long as each note.
 //
 // This never re-renders through React. A requestAnimationFrame loop reads the Transport
 // position (engine.timeline()) and the store (getState()) every frame, so positions come
@@ -14,6 +15,25 @@ const PX_PER_EIGHTH = 56
 const LANE_W = 96
 const ROW_GAP = 16 // horizontal offset per pitch row
 const FADE = 70 // px over which notes fade in at the top
+
+const LOOP_STEPS = 32 // a note-editor part loops over 32 16th-note steps (2 bars)
+
+// Fills a lit note (its seat is playing) or outlines a waiting one, in the seat's color.
+function mark(ctx, on, alpha, color) {
+  if (on) {
+    ctx.globalAlpha = alpha
+    ctx.fillStyle = color
+    ctx.shadowColor = color
+    ctx.shadowBlur = 16
+    ctx.fill()
+  } else {
+    ctx.globalAlpha = alpha * 0.4
+    ctx.shadowBlur = 0
+    ctx.strokeStyle = color
+    ctx.lineWidth = 2
+    ctx.stroke()
+  }
+}
 
 function draw(ctx) {
   ctx.clearRect(0, 0, 1920, 1080)
@@ -36,8 +56,29 @@ function draw(ctx) {
     ctx.fill()
     if (!tl.running || !p.pattern) continue
 
-    const grid = p.pattern.grid
     const ahead = (bottom - LANE_TOP) / PX_PER_EIGHTH
+    if (p.pattern.notes?.length) {
+      // Note-editor part: each note is a bar as long as the note; its lower end lands when it plays.
+      const px16 = PX_PER_EIGHTH / 2
+      const now16 = now * 2
+      for (const n of p.pattern.notes) {
+        const first = Math.max(0, Math.floor((now16 - n.start - n.length) / LOOP_STEPS) + 1)
+        for (let k = first; n.start + k * LOOP_STEPS <= now16 + ahead * 2; k++) {
+          const s = n.start + k * LOOP_STEPS
+          const low = Math.min(bottom, bottom - (s - now16) * px16)
+          const high = Math.max(LANE_TOP, bottom - (s + n.length - now16) * px16)
+          if (low - high < 1) continue
+          const alpha = Math.min(1, (low - LANE_TOP) / FADE)
+          if (alpha <= 0) continue
+          ctx.beginPath()
+          ctx.roundRect(laneX + (n.row - 2) * ROW_GAP - 9, high, 18, low - high, 9)
+          mark(ctx, seatOn(p.seat, (s * ticksPerEighth) / 2), alpha, p.color)
+        }
+      }
+      continue
+    }
+
+    const grid = p.pattern.grid
     for (let e = Math.ceil(now); e <= now + ahead; e++) {
       const step = e % 8
       const y = bottom - (e - now) * PX_PER_EIGHTH
@@ -48,19 +89,7 @@ function draw(ctx) {
         if (!grid[row]?.[step]) continue
         ctx.beginPath()
         ctx.arc(laneX + (row - 2) * ROW_GAP, y, 10, 0, Math.PI * 2)
-        if (on) {
-          ctx.globalAlpha = alpha
-          ctx.fillStyle = p.color
-          ctx.shadowColor = p.color
-          ctx.shadowBlur = 16
-          ctx.fill()
-        } else {
-          ctx.globalAlpha = alpha * 0.4
-          ctx.shadowBlur = 0
-          ctx.strokeStyle = p.color
-          ctx.lineWidth = 2
-          ctx.stroke()
-        }
+        mark(ctx, on, alpha, p.color)
       }
     }
   }

@@ -29,7 +29,7 @@ type Props = {
   keyName: string;
   /** Locks the editor, e.g. when the compose timer runs out. */
   disabled?: boolean;
-  /** For an audio preview when a note is placed. */
+  /** For an audio preview when a note is placed, moved or stretched. */
   onPlace?: (note: Note) => void;
   /** How many rows to show, from row 0 up (drums use 3). At most ROWS. */
   rows?: number;
@@ -115,6 +115,7 @@ export function NoteEditor({ notes, onChange, color, keyName, disabled = false, 
                   color={color}
                   disabled={disabled}
                   commit={commit}
+                  onPlace={onPlace}
                   rows={rows}
                 />
               ))}
@@ -150,6 +151,7 @@ function NoteView({
   color,
   disabled,
   commit,
+  onPlace,
   rows,
 }: {
   note: Note;
@@ -159,6 +161,7 @@ function NoteView({
   color: string;
   disabled: boolean;
   commit: (next: Note[]) => void;
+  onPlace?: (note: Note) => void;
   rows: number;
 }) {
   const [drag, setDragState] = useState<Drag | null>(null);
@@ -180,9 +183,14 @@ function NoteView({
   const finish = () => {
     const d = latest.current;
     const c = landing(note, d, cellW);
-    if (d?.kind === 'move' && c.row < rows) commit(move(notes, note.id, c.row, c.start));
-    else if (d?.kind === 'resize') commit(resize(notes, note.id, c.length));
+    let next = notes;
+    if (d?.kind === 'move' && c.row < rows) next = move(notes, note.id, c.row, c.start);
+    else if (d?.kind === 'resize') next = resize(notes, note.id, c.length);
     setDrag(null);
+    if (next === notes) return; // invalid drop: it snaps back
+    commit(next);
+    const moved = next.find((n) => n.id === note.id);
+    if (moved) onPlace?.(moved); // hear where it landed, for as long as it now lasts
   };
 
   // Handlers for React Native's responder props, rebuilt every render so they always see the current props.

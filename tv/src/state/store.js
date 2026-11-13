@@ -52,15 +52,19 @@ export function on(type, fn) {
 // ---- server messages ----
 
 // Converts the server's `state` (see /protocol) into the shape the screens use:
-//   players[].pattern = { instrument, grid } once patterns lock (calibrate/perform), else null
+//   players[].pattern = { instrument, grid, notes? } once patterns lock (calibrate/perform), else null
 //   history = finished performances [{ round, conductor, conductorName, key, tempo }]
 //   deadline = moved onto this machine's clock using serverTime, so a wrong TV clock doesn't matter
 function fromServerState(msg, prev) {
   const locked = msg.phase === 'calibrate' || msg.phase === 'perform'
   const patterns = msg.patterns || {}
+  const notes = msg.notes || {} // note-editor parts; when a seat has notes they replace its grid
   const players = (msg.players || []).map((p) => ({
     ...p,
-    pattern: locked && p.seat !== msg.conductor && patterns[p.seat] ? { instrument: p.instrument, grid: patterns[p.seat] } : null,
+    pattern:
+      locked && p.seat !== msg.conductor && patterns[p.seat]
+        ? { instrument: p.instrument, grid: patterns[p.seat], notes: notes[p.seat] }
+        : null,
   }))
   const history = (msg.performances || []).map((pf) => ({
     round: pf.round,

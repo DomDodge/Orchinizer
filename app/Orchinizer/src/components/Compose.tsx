@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { LOOP_STEPS, STEPS_PER_BEAT, type Note } from '../../../../protocol/messages.ts';
-import { playNote, playNoteFor, preload } from '../audio';
+import { playNoteFor, preload } from '../audio';
 import { onPatternRejected, send, useSecondsLeft } from '../net';
 import { DRUM_ROWS, instrumentInfo, type Player, type State } from '../protocol';
 import { NoteEditor } from './NoteEditor';
@@ -10,8 +10,8 @@ import { Btn, FG, H1, P, Screen, Timer } from './ui';
 /** Mount with key={round} so each round starts fresh. */
 export function Compose({ state, me }: { state: State; me: Player }) {
   const info = instrumentInfo(me.instrument);
-  const inst = info.voice;
-  const drums = inst === 'drums';
+  const inst = me.instrument; // each instrument has its own preview sounds
+  const drums = info.voice === 'drums';
   // A remount mid-round (e.g. after a reconnect) picks the part back up from the server.
   const [notes, setNotes] = useState<Note[]>(() => state.notes?.[me.seat] ?? []);
   const [playing, setPlaying] = useState(false);
@@ -74,7 +74,7 @@ export function Compose({ state, me }: { state: State; me: Player }) {
         color={me.color}
         keyName={state.key}
         disabled={left === 0}
-        onPlace={(n) => !playing && playNote(inst, state.key, n.row)}
+        onPlace={(n) => playNoteFor(inst, state.key, n.row, n.length * stepMs)}
         rows={drums ? DRUM_ROWS.length : undefined}
         rowLabels={drums ? DRUM_ROWS : undefined}
         playhead={playing ? step : -1}

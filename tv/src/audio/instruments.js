@@ -1,17 +1,18 @@
-// PLACEHOLDER SOUNDS. Replace this whole file freely; engine.js only depends on the interface below.
+// Synth sounds, one recipe per instrument. engine.js only depends on the interface below.
 //
-// Exports one factory per instrument: bass, pad, lead, drums.
-//
-//   const inst = bass(destination, { key })
+//   const inst = create(instrument, destination, { key })
+//     instrument   the server's instrument id, e.g. 'violin' (see /protocol INSTRUMENT_GROUPS).
+//                  Unknown ids get the piano.
 //     destination  Tone.js node to connect your output to (the engine's master bus).
-//     key          the round's key as a note name, e.g. 'C', 'F#'.
+//     key          the round's key as a note name, e.g. 'C', 'Bb'.
 //
-//   inst.play(row, time)
-//     row   0-4, the grid row of one lit cell (0 = lowest). For drums: 0 kick, 1 snare,
-//           2 hat; rows 3-4 are unused. If several rows are lit on a step, play() is
-//           called once per row with the same time.
-//     time  exact AudioContext time to sound the note. Always pass it through to
-//           triggerAttack*/start(); never play "now", or it drifts off the beat.
+//   inst.play(row, time, duration)
+//     row       0-4, the row of one note (0 = lowest). Drum kits (drums, timpani, bongos)
+//               use rows 0-2 only.
+//     time      exact AudioContext time to sound the note. Always pass it through to
+//               triggerAttack*/start(); never play "now", or it drifts off the beat.
+//     duration  seconds the note is held (a stretched note is longer). Plucked and struck
+//               instruments ring out on their own and ignore it.
 //
 //   inst.setVolume(level, time?)
 //     level 0-100 from the conductor. `time` is when the change should be heard
@@ -20,8 +21,10 @@
 //   inst.dispose()
 //     free every node; called when the performance ends.
 //
-// Each player gets their own instance, so two basses in one round never share state.
+// Each player gets their own instance, so two of the same instrument never share state.
 // Pitch: the five rows are the major pentatonic of the round's key; see `notesFor`.
+// The phone's preview samples (app/Orchinizer/scripts/gen-sounds.mjs) mimic these recipes and
+// use the same octaves, so keep the two in step when changing a sound.
 import * as Tone from 'tone'
 
 const PENTATONIC = [0, 2, 4, 7, 9] // semitones above the root; row n plays PENTATONIC[n]
@@ -31,10 +34,11 @@ export function notesFor(key, octave) {
   return PENTATONIC.map((i) => Tone.Frequency(root + i, 'midi').toNote())
 }
 
-// Shared plumbing: a gain node per instrument so setVolume works the same everywhere.
-function withVolume(destination, nodes, play) {
+// Shared plumbing: every instrument ends in one gain node, so setVolume works the same everywhere.
+// `nodes` are disposed with it; `out` is the node that feeds the gain.
+function instrument(destination, out, nodes, play) {
   const gain = new Tone.Gain(0.64).connect(destination) // 80/100, squared
-  nodes[0].connect(gain)
+  out.connect(gain)
   return {
     play,
     setVolume: (level, time) => gain.gain.rampTo((level / 100) ** 2, 0.05, time),
@@ -42,34 +46,153 @@ function withVolume(destination, nodes, play) {
   }
 }
 
-export function bass(destination, { key }) {
-  const notes = notesFor(key, 2)
-  // Poly, because play() can be called for several rows at the same time.
-  const synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'triangle' } })
-  return withVolume(destination, [synth], (row, time) => synth.triggerAttackRelease(notes[row], '8n', time))
+// A held instrument: a PolySynth through optional effects, sustained for the note's duration.
+function held(destination, key, octave, voice, options, effects = []) {
+  const notes = notesFor(key, octave)
+  const synth = new Tone.PolySynth(voice, options)
+  const chain = [synth, ...effects]
+  for (let i = 0; i < chain.length - 1; i++) chain[i].connect(chain[i + 1])
+  return instrument(destination, chain[chain.length - 1], chain, (row, time, duration) =>
+    synth.triggerAttackRelease(notes[row], Math.max(duration, 0.08), time),
+  )
 }
 
-export function pad(destination, { key }) {
-  const notes = notesFor(key, 3)
-  const synth = new Tone.PolySynth(Tone.Synth, { volume: -10 })
-  return withVolume(destination, [synth], (row, time) => synth.triggerAttackRelease(notes[row], '4n', time))
-}
-
-export function lead(destination, { key }) {
-  const notes = notesFor(key, 4)
-  const synth = new Tone.PolySynth(Tone.Synth, { volume: -6 })
-  return withVolume(destination, [synth], (row, time) => synth.triggerAttackRelease(notes[row], '16n', time))
-}
-
-export function drums(destination) {
+// A plucked string. PluckSynth is monophonic, so a few take turns.
+function plucked(destination, key, octave, options) {
+  const notes = notesFor(key, octave)
   const out = new Tone.Gain(1)
-  const kick = new Tone.MembraneSynth().connect(out)
-  const snare = new Tone.NoiseSynth({ envelope: { decay: 0.1, sustain: 0 }, volume: -10 }).connect(out)
-  const hat = new Tone.NoiseSynth({ envelope: { decay: 0.03, sustain: 0 }, volume: -20 }).connect(out)
-  const hits = [
-    (t) => kick.triggerAttackRelease('C1', '8n', t),
-    (t) => snare.triggerAttackRelease('16n', t),
-    (t) => hat.triggerAttackRelease('32n', t),
-  ]
-  return withVolume(destination, [out, kick, snare, hat], (row, time) => hits[row]?.(time))
+  const voices = Array.from({ length: 4 }, () => new Tone.PluckSynth(options).connect(out))
+  let next = 0
+  return instrument(destination, out, [out, ...voices], (row, time) => {
+    voices[next].triggerAttack(notes[row], time)
+    next = (next + 1) % voices.length
+  })
+}
+
+const bowed = (cutoff, vibratoDepth) => ({
+  options: {
+    oscillator: { type: 'fatsawtooth', count: 3, spread: 14 },
+    envelope: { attack: 0.12, decay: 0.2, sustain: 0.85, release: 0.35 },
+    volume: -8,
+  },
+  effects: () => [new Tone.Filter(cutoff, 'lowpass'), new Tone.Vibrato(5.5, vibratoDepth)],
+})
+
+const brass = (baseFrequency, octaves) => ({
+  options: {
+    oscillator: { type: 'sawtooth' },
+    envelope: { attack: 0.04, decay: 0.2, sustain: 0.8, release: 0.2 },
+    filterEnvelope: { attack: 0.06, decay: 0.3, sustain: 0.6, release: 0.2, baseFrequency, octaves },
+    volume: -10,
+  },
+})
+
+const RECIPES = {
+  // Strings
+  violin: (d, k) => held(d, k, 5, Tone.Synth, bowed(3800, 0.12).options, bowed(3800, 0.12).effects()),
+  viola: (d, k) => held(d, k, 4, Tone.Synth, bowed(2600, 0.1).options, bowed(2600, 0.1).effects()),
+  cello: (d, k) => held(d, k, 3, Tone.Synth, bowed(1800, 0.08).options, bowed(1800, 0.08).effects()),
+  contrabass: (d, k) => plucked(d, k, 2, { attackNoise: 0.6, dampening: 1400, resonance: 0.92, volume: 2 }), // pizzicato
+  harp: (d, k) =>
+    held(d, k, 4, Tone.Synth, {
+      oscillator: { type: 'triangle' },
+      envelope: { attack: 0.002, decay: 1.4, sustain: 0, release: 1.2 },
+      volume: -6,
+    }),
+  guitar: (d, k) => plucked(d, k, 3, { attackNoise: 1.2, dampening: 3200, resonance: 0.96, volume: 0 }),
+
+  // Wind
+  flute: (d, k) =>
+    held(
+      d, k, 5, Tone.Synth,
+      { oscillator: { type: 'sine' }, envelope: { attack: 0.07, decay: 0.1, sustain: 0.9, release: 0.18 }, volume: -6 },
+      [new Tone.Vibrato(5, 0.15)],
+    ),
+  clarinet: (d, k) =>
+    held(
+      d, k, 4, Tone.Synth,
+      { oscillator: { type: 'square' }, envelope: { attack: 0.04, decay: 0.1, sustain: 0.85, release: 0.12 }, volume: -10 },
+      [new Tone.Filter(1600, 'lowpass')],
+    ),
+  sax: (d, k) =>
+    held(
+      d, k, 4, Tone.Synth,
+      { oscillator: { type: 'sawtooth' }, envelope: { attack: 0.03, decay: 0.15, sustain: 0.8, release: 0.15 }, volume: -10 },
+      [new Tone.Filter({ frequency: 1500, type: 'lowpass', Q: 4 }), new Tone.Vibrato(4.5, 0.12)],
+    ),
+  trumpet: (d, k) => held(d, k, 4, Tone.MonoSynth, brass(450, 3).options),
+  trombone: (d, k) => held(d, k, 3, Tone.MonoSynth, brass(250, 2.5).options),
+  tuba: (d, k) => held(d, k, 2, Tone.MonoSynth, brass(120, 2).options),
+
+  // Percussion
+  drums: (d) => {
+    const out = new Tone.Gain(1)
+    const kick = new Tone.MembraneSynth().connect(out)
+    const snare = new Tone.NoiseSynth({ envelope: { decay: 0.1, sustain: 0 }, volume: -10 }).connect(out)
+    const hat = new Tone.NoiseSynth({ envelope: { decay: 0.03, sustain: 0 }, volume: -20 }).connect(out)
+    const hits = [
+      (t) => kick.triggerAttackRelease('C1', '8n', t),
+      (t) => snare.triggerAttackRelease('16n', t),
+      (t) => hat.triggerAttackRelease('32n', t),
+    ]
+    return instrument(d, out, [out, kick, snare, hat], (row, time) => hits[row]?.(time))
+  },
+  timpani: (d) => {
+    const out = new Tone.Gain(1)
+    const drum = new Tone.PolySynth(Tone.MembraneSynth, {
+      pitchDecay: 0.08,
+      octaves: 1.5,
+      envelope: { attack: 0.002, decay: 1.2, sustain: 0, release: 1 },
+    }).connect(out)
+    const pitches = ['C2', 'G2', 'C3'] // low, fifth, octave
+    return instrument(d, out, [out, drum], (row, time) => pitches[row] && drum.triggerAttackRelease(pitches[row], '2n', time))
+  },
+  bongos: (d) => {
+    const out = new Tone.Gain(1)
+    const drum = new Tone.PolySynth(Tone.MembraneSynth, {
+      pitchDecay: 0.01,
+      octaves: 1.2,
+      envelope: { attack: 0.001, decay: 0.16, sustain: 0, release: 0.1 },
+      volume: -2,
+    }).connect(out)
+    const slap = new Tone.NoiseSynth({ envelope: { attack: 0.001, decay: 0.05, sustain: 0 }, volume: -14 }).connect(out)
+    const hits = [
+      (t) => drum.triggerAttackRelease('G3', '16n', t), // low bongo
+      (t) => drum.triggerAttackRelease('D4', '16n', t), // high bongo
+      (t) => slap.triggerAttackRelease('32n', t),
+    ]
+    return instrument(d, out, [out, drum, slap], (row, time) => hits[row]?.(time))
+  },
+  xylophone: (d, k) =>
+    held(d, k, 5, Tone.FMSynth, {
+      harmonicity: 4,
+      modulationIndex: 3,
+      envelope: { attack: 0.001, decay: 0.45, sustain: 0, release: 0.4 },
+      modulationEnvelope: { attack: 0.001, decay: 0.08, sustain: 0, release: 0.1 },
+      volume: 2,
+    }),
+
+  // Keys
+  piano: (d, k) =>
+    held(d, k, 4, Tone.Synth, {
+      oscillator: { type: 'custom', partials: [1, 0.5, 0.25, 0.14, 0.07, 0.04] },
+      envelope: { attack: 0.004, decay: 1.6, sustain: 0.12, release: 0.8 },
+      volume: -6,
+    }),
+  organ: (d, k) =>
+    held(d, k, 3, Tone.Synth, {
+      oscillator: { type: 'custom', partials: [1, 0.7, 0.45, 0, 0.3, 0, 0, 0.18] },
+      envelope: { attack: 0.01, decay: 0, sustain: 1, release: 0.08 },
+      volume: -8,
+    }),
+  synth: (d, k) =>
+    held(
+      d, k, 4, Tone.Synth,
+      { oscillator: { type: 'fatsawtooth', count: 3, spread: 30 }, envelope: { attack: 0.02, decay: 0.3, sustain: 0.6, release: 0.3 }, volume: -8 },
+      [new Tone.Filter({ frequency: 1400, type: 'lowpass', Q: 3 })],
+    ),
+}
+
+export function create(instrumentId, destination, { key }) {
+  return (RECIPES[instrumentId] || RECIPES.piano)(destination, key)
 }
