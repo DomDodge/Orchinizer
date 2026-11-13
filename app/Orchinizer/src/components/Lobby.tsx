@@ -9,6 +9,8 @@ export function Lobby({ state, me }: { state: State; me: Player }) {
   const conducting = state.host === me.seat;
   const [confirmKick, setConfirmKick] = useState(0); // seat waiting for a 2nd tap
   const takenBy = new Map(state.players.filter((p) => p.instrument).map((p) => [p.instrument, p]));
+  const waitingFor = state.players.filter((p) => p.connected && !p.bot && !p.instrument);
+  const startLabel = !state.tvConnected ? 'Waiting for TV connection' : waitingFor.length ? 'Waiting for instrument picks' : 'Start game';
 
   useEffect(() => {
     if (!error) return;
@@ -112,12 +114,12 @@ export function Lobby({ state, me }: { state: State; me: Player }) {
         </Section>
 
         {error && <P color="#FF5252">{error}</P>}
-        <P>{state.tvConnected ? 'TV connected · ready for sound' : 'Connect the TV screen to hear the orchestra.'}</P>
-        {!state.tvConnected && <P>Open {SERVER_URL.replace(/^ws/, 'http').replace(/\/ws\/?$/, '/')} on the TV and enter room {state.room}.</P>}
+        <P color={state.tvConnected ? '#69F0AE' : '#FFB300'}>{state.tvConnected ? '✓ TV connected to this room' : `TV is not connected to room ${state.room}`}</P>
+        {!state.tvConnected && <P>Open {SERVER_URL.replace(/^ws/, 'http').replace(/\/ws\/?$/, '/')} on the TV. If it shows a different room code, join that code on every player device.</P>}
+        {waitingFor.length > 0 && <P color="#FFB300">Still choosing an instrument: {waitingFor.map((p) => p.seat === me.seat ? `${p.name} (you)` : p.name).join(', ')}.</P>}
         {conducting ? (
-          <Btn label="Start game" disabled={!state.tvConnected || state.players.some((p) => p.connected && !p.bot && !p.instrument)} onPress={() => send({ type: 'host_action', action: 'start' })} />
+          <Btn label={startLabel} disabled={!state.tvConnected || waitingFor.length > 0} onPress={() => send({ type: 'host_action', action: 'start' })} />
         ) : <P>Waiting for the host to start…</P>}
-        {conducting && state.players.some((p) => p.connected && !p.instrument) && <P>Everyone needs to pick an instrument first, including you.</P>}
       </ScrollView>
     </Screen>
   );

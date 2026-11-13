@@ -10,6 +10,7 @@ import * as Tone from 'tone'
 import * as store from '../state/store.js'
 import { send } from '../net/socket.js'
 import * as instruments from './instruments.js' // only via play / setVolume / dispose
+import { partNotes, STEPS_PER_BEAT } from './part.js'
 
 if (import.meta.env.DEV) window.Tone = Tone // for poking at the Transport from devtools
 
@@ -28,7 +29,7 @@ const Draw = Tone.getDraw()
 let master = null // everything goes through this; muting sets it to 0 and timing carries on
 let perf = null
 let live = false
-let voices = {} // seat -> { inst, part }
+let voices = {} // seat -> { insts: { instrument: inst }, part, setVolume(level, time?) }
 let replaying = null // { fromTick, toTick, resolve } while a replay runs
 
 // Must be called from a click handler.
@@ -87,7 +88,7 @@ function insertEvent(e) {
 function scheduleEvent(e) {
   T.schedule((time) => {
     if (e.type === 'volume') {
-      voices[e.seat]?.inst.setVolume(e.level, time)
+      voices[e.seat]?.setVolume(e.level, time)
     }
     Draw.schedule(() => {
       if (e.type === 'cue') {
@@ -107,24 +108,36 @@ function load(p) {
   T.timeSignature = 4
   T.position = 0
 
+  const ticksPerStep = T.PPQ / STEPS_PER_BEAT
   for (const pl of p.players) {
-    const inst = voiceFor(pl.instrument)(master, { key: p.key })
-
-    // One event per step that has any lit rows. Step n is n eighth notes into the bar.
-    const steps = []
-    for (let step = 0; step < 8; step++) {
-      const rows = [0, 1, 2, 3, 4].filter((r) => pl.pattern.grid[r]?.[step])
-      if (rows.length) steps.push({ time: `0:${Math.floor(step / 2)}:${(step % 2) * 2}`, rows, step })
+    // Grid parts loop every bar in 8ths; note-editor parts every 2 bars in 16ths, with
+    // held notes and optionally a different instrument per note. partNotes unifies them.
+    const { loopSteps, notes } = partNotes(pl.pattern)
+    const insts = {}
+    for (const name of new Set([pl.instrument, ...notes.map((n) => n.instrument || pl.instrument)])) {
+      insts[name] = voiceFor(name)(master, { key: p.key })
     }
+
+    // One event per step that has notes on it.
+    const byStart = new Map()
+    for (const n of notes) byStart.set(n.start, [...(byStart.get(n.start) || []), n])
+    const events = [...byStart].map(([start, ns]) => ({ time: `${start * ticksPerStep}i`, notes: ns }))
     const part = new Tone.Part((time, ev) => {
       if (!isOn(pl.seat, Math.round(T.getTicksAtTime(time)))) return
-      ev.rows.forEach((row) => inst.play(row, time))
+      for (const n of ev.notes) {
+        const dur = n.fromGrid ? undefined : Tone.Ticks(n.length * ticksPerStep).toSeconds()
+        insts[n.instrument || pl.instrument].play(n.row, time, dur)
+      }
       Draw.schedule(() => store.bumpHit(pl.seat), time)
-    }, steps)
+    }, events)
     part.loop = true
-    part.loopEnd = '1m'
+    part.loopEnd = `${loopSteps * ticksPerStep}i`
     part.start(0)
-    voices[pl.seat] = { inst, part }
+    voices[pl.seat] = {
+      insts,
+      part,
+      setVolume: (level, t) => Object.values(insts).forEach((i) => i.setVolume(level, t)),
+    }
   }
 
   // Beat clock: drives beat dots / pulse and the per-bar message to phones.
@@ -142,7 +155,7 @@ function load(p) {
 function teardown() {
   T.stop()
   T.cancel(0)
-  Object.values(voices).forEach((v) => (v.part.dispose(), v.inst.dispose()))
+  Object.values(voices).forEach((v) => (v.part.dispose(), Object.values(v.insts).forEach((i) => i.dispose())))
   voices = {}
   store.resetPlayback()
 }
@@ -191,7 +204,7 @@ store.on('volume', (msg) => {
   if (!live || !voices[msg.seat]) return
   // Heard at Tone.now(), so that's the tick we log.
   const tick = Math.round(T.getTicksAtTime(Tone.now()))
-  voices[msg.seat].inst.setVolume(msg.level)
+  voices[msg.seat].setVolume(msg.level)
   insertEvent({ tick, beat: Math.floor(tick / T.PPQ), seat: msg.seat, type: 'volume', level: msg.level })
 })
 
@@ -210,7 +223,11 @@ store.on('performances', (msg) => {
       round: sp.round,
       tempo: sp.tempo,
       key: sp.key,
-      players: (sp.parts || []).map((pt) => ({ seat: pt.seat, instrument: pt.instrument, pattern: { instrument: pt.instrument, grid: pt.steps } })),
+      players: (sp.parts || []).map((pt) => ({
+        seat: pt.seat,
+        instrument: pt.instrument,
+        pattern: { instrument: pt.instrument, grid: pt.steps, notes: pt.notes },
+      })),
       events,
       endTick: (lastBeat + 16) * ppq, // the log has no end marker; play 4 bars past the last cue
     })
@@ -249,7 +266,7 @@ export function replay(p, { fromTick = 0, toTick = p.endTick } = {}) {
     if (e.type === 'cue') playing[e.seat] = e.action === 'in'
     else volumes[e.seat] = e.level
   }
-  Object.entries(volumes).forEach(([seat, level]) => voices[seat]?.inst.setVolume(level))
+  Object.entries(volumes).forEach(([seat, level]) => voices[seat]?.setVolume(level))
   store.setReplayState(playing, volumes)
 
   return new Promise((resolve) => {

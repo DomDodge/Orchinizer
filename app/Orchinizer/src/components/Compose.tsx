@@ -1,43 +1,60 @@
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { playNote, preload } from '../audio';
-import { send, useSecondsLeft } from '../net';
-import { DRUM_ROWS, emptySteps, instrumentInfo, noteName, ROWS, STEPS, type Player, type State, type Steps } from '../protocol';
-import { Btn, DIM, FG, H1, P, Screen, Timer } from './ui';
+import { StyleSheet, Text, View } from 'react-native';
+import { LOOP_STEPS, STEPS_PER_BEAT, type Note } from '../../../../protocol/messages.ts';
+import { playNote, playNoteFor, preload } from '../audio';
+import { onPatternRejected, send, useSecondsLeft } from '../net';
+import { DRUM_ROWS, instrumentInfo, type Player, type State } from '../protocol';
+import { NoteEditor } from './NoteEditor';
+import { Btn, FG, H1, P, Screen, Timer } from './ui';
 
 /** Mount with key={round} so each round starts fresh. */
 export function Compose({ state, me }: { state: State; me: Player }) {
   const info = instrumentInfo(me.instrument);
   const inst = info.voice;
   const drums = inst === 'drums';
-  const [steps, setSteps] = useState<Steps>(() => state.patterns[me.seat] ?? emptySteps());
+  // A remount mid-round (e.g. after a reconnect) picks the part back up from the server.
+  const [notes, setNotes] = useState<Note[]>(() => state.notes?.[me.seat] ?? []);
   const [playing, setPlaying] = useState(false);
-  const [col, setCol] = useState(-1);
+  const [step, setStep] = useState(-1);
+  const [rejected, setRejected] = useState<string | null>(null);
   const left = useSecondsLeft(state.deadline);
-  // Top row = highest note. Drums only use rows 0–2.
-  const rows = drums ? [2, 1, 0] : Array.from({ length: ROWS }, (_, i) => ROWS - 1 - i);
+  const stepMs = 60000 / state.tempo / STEPS_PER_BEAT;
 
   useEffect(() => preload(inst, state.key), [inst, state.key]);
 
+  // The server refused a change: go back to the last part it accepted and say why.
+  const serverNotes = state.notes?.[me.seat];
+  useEffect(
+    () =>
+      onPatternRejected((message) => {
+        setNotes(serverNotes ?? []);
+        setRejected(message);
+      }),
+    [serverNotes],
+  );
+  useEffect(() => {
+    if (!rejected) return;
+    const t = setTimeout(() => setRejected(null), 3000);
+    return () => clearTimeout(t);
+  }, [rejected]);
+
+  // Preview: loop the part in 16th-note steps, each note held for its length.
   useEffect(() => {
     if (!playing) return;
-    let step = 0;
+    let s = 0;
     const tick = () => {
-      setCol(step);
-      steps.forEach((row, r) => row[step] && rows.includes(r) && playNote(inst, state.key, r));
-      step = (step + 1) % STEPS;
+      setStep(s);
+      for (const n of notes) if (n.start === s) playNoteFor(inst, state.key, n.row, n.length * stepMs);
+      s = (s + 1) % LOOP_STEPS;
     };
     tick();
-    const id = setInterval(tick, 60000 / state.tempo / 2); // 8th notes
+    const id = setInterval(tick, stepMs);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, steps, state.tempo, state.key, inst]);
+  }, [playing, notes, stepMs, state.key, inst]);
 
-  const toggle = (r: number, c: number) => {
-    const next = steps.map((row, i) => (i === r ? row.map((on, j) => (j === c ? !on : on)) : row));
-    setSteps(next);
-    send({ type: 'pattern', steps: next });
-    if (next[r][c] && !playing) playNote(inst, state.key, r);
+  const onChange = (next: Note[]) => {
+    setNotes(next);
+    send({ type: 'pattern', notes: next });
   };
 
   return (
@@ -51,27 +68,22 @@ export function Compose({ state, me }: { state: State; me: Player }) {
       <P>
         Round {state.round} · key of {state.key} · {state.tempo} bpm
       </P>
-      <View style={styles.grid}>
-        {rows.map((r) => (
-          <View key={r} style={styles.row}>
-            <Text style={styles.label}>{drums ? DRUM_ROWS[r] : noteName(state.key, r)}</Text>
-            {steps[r].map((on, c) => (
-              <Pressable
-                key={c}
-                onPress={() => toggle(r, c)}
-                style={[
-                  styles.cell,
-                  c % 2 === 0 && styles.beat,
-                  on && { backgroundColor: me.color },
-                  playing && col === c && styles.playhead,
-                ]}
-              />
-            ))}
-          </View>
-        ))}
-      </View>
+      <NoteEditor
+        notes={notes}
+        onChange={onChange}
+        color={me.color}
+        keyName={state.key}
+        disabled={left === 0}
+        onPlace={(n) => !playing && playNote(inst, state.key, n.row)}
+        rows={drums ? DRUM_ROWS.length : undefined}
+        rowLabels={drums ? DRUM_ROWS : undefined}
+        playhead={playing ? step : -1}
+      />
+      {rejected && <P color="#FF5252">{rejected}</P>}
       <Btn label={playing ? '■ Stop preview' : '▶ Preview'} color={playing ? '#444' : '#6C63FF'} onPress={() => setPlaying(!playing)} />
-      <P>Your part loops when the conductor cues you in. Empty parts get a default.</P>
+      <P color={left === 0 ? FG : undefined}>
+        {left === 0 ? "Time's up! Your part is locked in." : 'Your part loops when the conductor cues you in. Empty parts get a default.'}
+      </P>
     </Screen>
   );
 }
@@ -97,10 +109,4 @@ export function ConductorWaiting({ state }: { state: State }) {
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   inst: { fontSize: 30, fontWeight: '900' },
-  grid: { gap: 6, marginVertical: 8 },
-  row: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  label: { width: 48, color: DIM, fontWeight: '700', fontSize: 14 },
-  cell: { flex: 1, aspectRatio: 1, borderRadius: 8, backgroundColor: '#1E1E2C' },
-  beat: { backgroundColor: '#26263A' },
-  playhead: { borderWidth: 3, borderColor: '#fff' },
 });

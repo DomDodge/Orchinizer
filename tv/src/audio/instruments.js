@@ -6,12 +6,14 @@
 //     destination  Tone.js node to connect your output to (the engine's master bus).
 //     key          the round's key as a note name, e.g. 'C', 'F#'.
 //
-//   inst.play(row, time)
+//   inst.play(row, time, duration?)
 //     row   0-4, the grid row of one lit cell (0 = lowest). For drums: 0 kick, 1 snare,
 //           2 hat; rows 3-4 are unused. If several rows are lit on a step, play() is
 //           called once per row with the same time.
 //     time  exact AudioContext time to sound the note. Always pass it through to
 //           triggerAttack*/start(); never play "now", or it drifts off the beat.
+//     duration  seconds to hold the note (note-editor parts can stretch notes). Omitted
+//           for grid parts: use the instrument's natural length. Drums ignore it.
 //
 //   inst.setVolume(level, time?)
 //     level 0-100 from the conductor. `time` is when the change should be heard
@@ -46,19 +48,19 @@ export function bass(destination, { key }) {
   const notes = notesFor(key, 2)
   // Poly, because play() can be called for several rows at the same time.
   const synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'triangle' } })
-  return withVolume(destination, [synth], (row, time) => synth.triggerAttackRelease(notes[row], '8n', time))
+  return withVolume(destination, [synth], (row, time, dur) => synth.triggerAttackRelease(notes[row], dur || '8n', time))
 }
 
 export function pad(destination, { key }) {
   const notes = notesFor(key, 3)
   const synth = new Tone.PolySynth(Tone.Synth, { volume: -10 })
-  return withVolume(destination, [synth], (row, time) => synth.triggerAttackRelease(notes[row], '4n', time))
+  return withVolume(destination, [synth], (row, time, dur) => synth.triggerAttackRelease(notes[row], dur || '4n', time))
 }
 
 export function lead(destination, { key }) {
   const notes = notesFor(key, 4)
   const synth = new Tone.PolySynth(Tone.Synth, { volume: -6 })
-  return withVolume(destination, [synth], (row, time) => synth.triggerAttackRelease(notes[row], '16n', time))
+  return withVolume(destination, [synth], (row, time, dur) => synth.triggerAttackRelease(notes[row], dur || '16n', time))
 }
 
 export function drums(destination) {
