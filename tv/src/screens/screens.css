@@ -299,3 +299,371 @@
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* ---- shared bits for full-screen (non-stage) screens ---- */
+.screen {
+  position: absolute;
+  inset: 0;
+  padding: 64px 80px;
+}
+.eyebrow {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.accent {
+  color: var(--accent);
+}
+.chips {
+  display: flex;
+  gap: 14px;
+  margin-top: 24px;
+}
+.chips.center {
+  justify-content: center;
+}
+.big-chip {
+  font-size: 24px;
+  color: var(--text);
+  padding: 12px 24px;
+}
+.big-chip b {
+  font-family: var(--display);
+}
+.color-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex: none;
+}
+.footer-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 44px;
+  margin: 0;
+  text-align: center;
+  font-size: 26px;
+  color: var(--muted);
+}
+.btn.btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border: 2px solid var(--border);
+}
+
+/* ---- Compose ---- */
+.compose-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.compose-head h1 {
+  font-size: 96px;
+  line-height: 1.05;
+  margin-top: 8px;
+}
+.compose-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+  margin-top: 64px;
+}
+.compose-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.compose-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.compose-name {
+  font: 800 36px var(--display);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compose-notes {
+  font-size: 22px;
+  color: var(--muted);
+}
+.compose-notes .num {
+  font-size: 44px;
+  color: var(--text);
+  margin-right: 6px;
+}
+.meter {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  gap: 5px;
+}
+.meter-seg {
+  height: 22px;
+  border-radius: 4px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  transition: background 0.2s;
+}
+
+/* ---- NextRound ---- */
+.next-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding-bottom: 80px;
+}
+.next-label {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 40px;
+  color: var(--muted);
+}
+.next-name {
+  font-size: 240px;
+  line-height: 1;
+}
+.next-count {
+  margin-top: 36px;
+  font-size: 120px;
+  height: 130px;
+  color: var(--accent);
+  animation: next-pop 0.5s ease-out;
+}
+@keyframes next-pop {
+  from {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+.next-strip {
+  position: absolute;
+  left: 80px;
+  right: 80px;
+  bottom: 56px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+}
+.next-past {
+  color: var(--text);
+  font-size: 22px;
+}
+
+/* ---- Vote ---- */
+.vote-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.vote-head h1 {
+  font-size: 80px;
+}
+.vote-grid {
+  display: grid;
+  gap: 24px;
+  margin-top: 40px;
+}
+.vote-card {
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 24px;
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition:
+    border-color 0.3s,
+    background 0.3s;
+}
+.vote-card.active {
+  border-color: var(--accent);
+  background: var(--card-2);
+}
+.vote-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.badge {
+  font-size: 18px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--card-2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.badge-now {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+.badge-done {
+  color: var(--text);
+}
+.vote-name {
+  font: 800 52px var(--display);
+  line-height: 1.1;
+}
+.vote-meta {
+  font-size: 20px;
+  color: var(--muted);
+}
+.mini-stage {
+  width: 100%;
+  height: 170px;
+  margin: 6px 0;
+}
+.two-rows .mini-stage {
+  height: 110px;
+}
+.two-rows .vote-name {
+  font-size: 40px;
+}
+.mini-ping {
+  animation: seat-ping 0.45s ease-out forwards;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.replay-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.replay-fill {
+  height: 100%;
+  border-radius: 4px;
+}
+.vote-count {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.vote-count .num {
+  font-size: 48px;
+}
+.vote-label {
+  font-size: 20px;
+  color: var(--muted);
+  margin-right: auto;
+}
+.pips {
+  display: flex;
+  gap: 6px;
+}
+.pip {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+}
+.pip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ---- Results ---- */
+.results {
+  display: grid;
+  grid-template-columns: 1fr 760px;
+  gap: 64px;
+  align-items: center;
+}
+.results-left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.results-label {
+  font: 800 30px var(--display);
+  letter-spacing: 0.3em;
+  color: var(--accent);
+  margin-top: 8px;
+}
+.results-name {
+  font-size: 200px;
+  line-height: 1;
+  margin-top: 8px;
+}
+.results-sub {
+  font-size: 36px;
+  color: var(--muted);
+  margin: 12px 0 0;
+}
+.results-votes {
+  font-size: 28px;
+  color: var(--muted);
+  margin-top: 12px;
+}
+.results-votes .num {
+  font-size: 52px;
+  color: var(--text);
+}
+.results-runners {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 36px;
+  width: 640px;
+}
+.runner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 24px;
+  padding: 12px 20px;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+.runner-place {
+  width: 56px;
+  color: var(--muted);
+}
+.runner-name {
+  font-weight: 700;
+  flex: 1;
+}
+.runner-round,
+.runner-votes {
+  color: var(--muted);
+}
+.results-actions {
+  display: flex;
+  gap: 18px;
+  margin-top: 40px;
+}
+.results-card {
+  background: var(--card);
+  border: 2px solid var(--accent);
+  border-radius: 28px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.results-card .mini-stage {
+  height: 260px;
+}
+.results-card-note {
+  margin: 0;
+  font-size: 22px;
+  color: var(--muted);
+}

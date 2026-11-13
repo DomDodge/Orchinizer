@@ -5,9 +5,21 @@ import Placeholder from './screens/Placeholder.jsx'
 import Lobby from './screens/Lobby.jsx'
 import Calibrate from './screens/Calibrate.jsx'
 import Perform from './screens/Perform.jsx'
+import Compose from './screens/Compose.jsx'
+import NextRound from './screens/NextRound.jsx'
+import Vote from './screens/Vote.jsx'
+import Results from './screens/Results.jsx'
 
 // Screens get registered here as they're built; anything missing shows the placeholder.
-const SCREENS = { lobby: Lobby, calibrate: Calibrate, perform: Perform }
+const SCREENS = {
+  lobby: Lobby,
+  compose: Compose,
+  calibrate: Calibrate,
+  perform: Perform,
+  next_round: NextRound,
+  vote: Vote,
+  results: Results,
+}
 
 // Everything is laid out at 1920x1080 and scaled to fit the window.
 function useFitScale() {

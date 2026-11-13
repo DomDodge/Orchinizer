@@ -137,7 +137,8 @@ export function createMockServer(deliver) {
   }
 
   function vote() {
-    const len = LEN.votePerRound * s.history.length + 5000
+    // Not shortened by ?speed=: replay clips always take a real 10 s each.
+    const len = (LEN.votePerRound * s.history.length + 5000) / MOCK_SPEED
     phase('vote', len, { votes: Object.fromEntries(s.history.map((h) => [h.round, 0])) })
     every(1500, () => {
       const r = pick(s.history).round

@@ -98,6 +98,7 @@ export function setCue(seat, action, beat) {
 }
 export const setVolume = (seat, level) => set({ volumes: { ...state.volumes, [seat]: level } })
 export const bumpHit = (seat) => set({ hits: { ...state.hits, [seat]: (state.hits[seat] || 0) + 1 } })
+export const setReplayState = (playing, volumes) => set({ playing, volumes, hits: {}, lastCue: null })
 export const resetPlayback = () => set({ playing: {}, hits: {}, beat: -1, bar: -1 })
 export const savePerformance = (p) => set({ performances: { ...state.performances, [p.round]: p } })
 

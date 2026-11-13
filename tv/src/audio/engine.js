@@ -20,6 +20,7 @@ let master = null // everything goes through this; muting sets it to 0 and timin
 let perf = null
 let live = false
 let voices = {} // seat -> { inst, part }
+let replaying = null // { fromTick, toTick, resolve } while a replay runs
 
 // Must be called from a click handler.
 export function unlock() {
@@ -57,9 +58,9 @@ export function seatOn(seat, tick) {
   return !!perf && isOn(seat, tick)
 }
 
-function isOn(seat, tick) {
+function isOn(seat, tick, events = perf.events) {
   let on = false
-  for (const e of perf.events) {
+  for (const e of events) {
     if (e.tick > tick) break
     if (e.seat === seat && e.type === 'cue') on = e.action === 'in'
   }
@@ -82,7 +83,7 @@ function scheduleEvent(e) {
     Draw.schedule(() => {
       if (e.type === 'cue') {
         store.setCue(e.seat, e.action, e.beat)
-        console.log(`[audio] cue #${e.id} seat ${e.seat} ${e.action} landed on beat ${e.beat}`)
+        if (live) console.log(`[audio] cue #${e.id} seat ${e.seat} ${e.action} landed on beat ${e.beat}`)
       } else {
         store.setVolume(e.seat, e.level)
       }
@@ -139,6 +140,7 @@ function teardown() {
 }
 
 function startLive(state) {
+  finishReplay(false)
   const p = {
     round: state.round,
     tempo: state.tempo,
@@ -184,3 +186,64 @@ store.on('volume', (msg) => {
   voices[msg.seat].inst.setVolume(msg.level)
   insertEvent({ tick, beat: Math.floor(tick / T.PPQ), seat: msg.seat, type: 'volume', level: msg.level })
 })
+
+// ---- replays ----
+
+// Picks the `seconds`-long window (starting on a bar line) with the most parts playing.
+export function bestClip(p, seconds = 10) {
+  const ppq = T.PPQ
+  const len = Math.round(((seconds * p.tempo) / 60) * ppq)
+  const end = p.endTick || 0
+  if (end <= len) return { fromTick: 0, toTick: Math.max(end, 1) }
+  const seats = p.players.map((pl) => pl.seat)
+  let best = 0
+  let bestScore = -1
+  for (let from = 0; from + len <= end; from += 4 * ppq) {
+    const score = seats.filter((s) => isOn(s, from + len / 2, p.events)).length
+    if (score > bestScore) [best, bestScore] = [from, score]
+  }
+  return { fromTick: best, toTick: best + len }
+}
+
+// Plays a recorded performance from its patterns + log, exactly as it happened.
+// Resolves true when the clip ends, false if it was stopped early.
+export function replay(p, { fromTick = 0, toTick = p.endTick } = {}) {
+  finishReplay(false)
+  if (!master || !p || !(toTick > fromTick)) return Promise.resolve(false)
+  live = false
+  load(p)
+
+  // Recreate the state at fromTick: who was playing and at what volume.
+  const playing = {}
+  const volumes = {}
+  for (const e of p.events) {
+    if (e.tick > fromTick) break
+    if (e.type === 'cue') playing[e.seat] = e.action === 'in'
+    else volumes[e.seat] = e.level
+  }
+  Object.entries(volumes).forEach(([seat, level]) => voices[seat]?.inst.setVolume(level))
+  store.setReplayState(playing, volumes)
+
+  return new Promise((resolve) => {
+    replaying = { fromTick, toTick, resolve }
+    T.schedule((time) => Draw.schedule(() => finishReplay(true), time), `${toTick}i`)
+    T.start('+0.1', `${fromTick}i`)
+  })
+}
+
+export const stopReplay = () => finishReplay(false)
+
+function finishReplay(completed) {
+  const r = replaying
+  if (!r) return
+  replaying = null
+  teardown()
+  r.resolve(completed)
+}
+
+// 0..1 through the current replay (read it every frame), or null when nothing is replaying.
+export function replayProgress() {
+  if (!replaying) return null
+  const tick = T.getTicksAtTime(Tone.immediate())
+  return Math.min(1, Math.max(0, (tick - replaying.fromTick) / (replaying.toTick - replaying.fromTick)))
+}
