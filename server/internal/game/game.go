@@ -19,7 +19,7 @@ type Timings struct {
 }
 
 var DefaultTimings = Timings{
-	Compose:   60 * time.Second,
+	Compose:   180 * time.Second,
 	Calibrate: 30 * time.Second,
 	Perform:   45 * time.Second,
 	Vote:      30 * time.Second,
@@ -202,6 +202,7 @@ func (r *Room) startCompose(conductor int) {
 	for _, p := range r.seatOrder() {
 		p.playing, p.level = false, 80
 		p.steps, p.noteCount = protocol.Grid{}, 0
+		p.notes = nil
 		if !p.bot {
 			p.instrument = p.pick
 			if p.seat == conductor {
@@ -375,6 +376,7 @@ func (r *Room) toLobby() {
 		}
 		p.vote, p.playing = 0, false
 		p.steps, p.noteCount = protocol.Grid{}, 0
+		p.notes = nil
 		p.instrument = p.pick
 		p.level = 80
 	}

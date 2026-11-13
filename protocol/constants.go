@@ -27,6 +27,13 @@ const ScaleMajorPentatonic = "major_pentatonic"
 // MajorPentatonic: semitones above the tonic. Row r of a Grid plays degree r.
 var MajorPentatonic = [Rows]int{0, 2, 4, 7, 9}
 
+// Note editor. messages.ts mirrors these.
+const (
+	StepsPerBeat = 4  // 16th notes
+	LoopSteps    = 32 // 2 bars of 4/4; every part loops at this length
+	MaxNotes     = 16 // notes per player
+)
+
 // RoomCodeAlphabet: room codes are 4 letters from this set (no I or O).
 const RoomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 const RoomCodeLength = 4

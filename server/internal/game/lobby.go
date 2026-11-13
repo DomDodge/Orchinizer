@@ -30,6 +30,7 @@ func (r *Room) setPick(p *player, instrument string) string {
 	}
 	p.pick, p.instrument = instrument, instrument
 	p.steps, p.noteCount = protocol.Grid{}, 0
+	p.notes = nil
 	return ""
 }
 func (r *Room) lobbyMessage(c Client, p *player, typ string, raw []byte) {

@@ -35,3 +35,35 @@ test('every round key can preview all five rows, including high Bb notes', () =>
   assert.equal(played.length, 40);
   assert.deepEqual(played[34], { source: 'lead_7', rate: 2, correctPitch: false });
 });
+
+test('playNoteFor stops a stretched note after its length, and a replay cancels the stop', () => {
+  const log: string[] = [];
+  const timers: { f: () => void; ms: number; cleared: boolean }[] = [];
+  const sounds = Object.fromEntries(['bass', 'pad', 'lead', 'drums'].map(voice => [voice,
+    Array.from({ length: voice === 'drums' ? 3 : 19 }, (_, i) => `${voice}_${i}`)]));
+  const api: any = {};
+  runInNewContext(source, {
+    exports: api,
+    setTimeout: (f: () => void, ms: number) => (timers.push({ f, ms, cleared: false }), timers.length - 1),
+    clearTimeout: (id: number) => { timers[id].cleared = true; },
+    require: (name: string) => {
+      if (name === './protocol') return { keyRoot, SCALE };
+      if (name === './sounds.gen') return { SOUNDS: sounds };
+      return { createAudioPlayer: (source: string) => ({
+        playbackRate: 1, shouldCorrectPitch: true, seekTo() {},
+        play() { log.push(`play ${source}`); }, pause() { log.push(`stop ${source}`); },
+      }) };
+    },
+  });
+  api.playNoteFor('lead', 'C', 0, 600);
+  assert.equal(timers[0].ms, 600);
+  timers[0].f();
+  assert.deepEqual(log, ['play lead_0', 'stop lead_0']);
+
+  api.playNoteFor('lead', 'C', 0, 600);
+  api.playNote('lead', 'C', 0); // tapped again before the stop: the old stop must not cut it off
+  assert.equal(timers[1].cleared, true);
+
+  api.playNoteFor('drums', 'C', 0, 600);
+  assert.equal(timers.length, 2, 'drum hits are not stopped');
+});
