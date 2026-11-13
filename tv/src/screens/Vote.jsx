@@ -74,7 +74,7 @@ export default function Vote() {
               />
               <ReplayBar active={status === 'now'} value={status === 'done' ? 1 : 0} />
               <div className="vote-count">
-                <span className="num">{count}</span>
+                <span key={count} className="num pop">{count}</span>
                 <span className="vote-label">vote{count === 1 ? '' : 's'}</span>
                 <span className="pips">
                   {Array.from({ length: Math.max(count, players.length - 1) }, (_, k) => (

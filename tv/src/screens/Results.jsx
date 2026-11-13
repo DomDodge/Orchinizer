@@ -51,7 +51,7 @@ export default function Results() {
       <div className="results-left">
         <Icon name="crown" size={96} className="accent" strokeWidth={1.6} />
         <div className="results-label">WINNER</div>
-        <h1 className="results-name" style={{ color: winner?.color }}>
+        <h1 className="results-name rise" style={{ color: winner?.color }}>
           {winner?.name}
         </h1>
         <p className="results-sub">conducted the best performance</p>
