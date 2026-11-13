@@ -23,6 +23,7 @@ func main() {
 	envSeconds(log, "CALIBRATE_SECONDS", &t.Calibrate)
 	envSeconds(log, "PERFORM_SECONDS", &t.Perform)
 	envSeconds(log, "VOTE_SECONDS", &t.Vote)
+	envSeconds(log, "REPLAY_SECONDS", &t.ReplayClip)
 	log.Info("timings", "compose", t.Compose, "calibrate", t.Calibrate, "perform", t.Perform, "vote", t.Vote)
 	reg := game.NewRegistry(log, t)
 
