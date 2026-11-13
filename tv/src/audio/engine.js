@@ -1,9 +1,7 @@
-// Owns musical time. Every locked pattern is a looping Tone.Part on the Transport: a note-editor
-// part loops over 2 bars of 16ths, an old grid part over 1 bar of 8ths. Cues land on the next
-// beat; all music-tied visuals go through Tone.Draw.
+// Owns musical time. Every locked pattern is a looping one-bar Tone.Part on the
+// Transport. Cues land on the next beat; all music-tied visuals go through Tone.Draw.
 //
 // A performance is { round, tempo, key, players: [{ seat, instrument, pattern }], events, endTick }.
-// pattern = { instrument, grid, notes? }. When `notes` has any, they're played and the grid is ignored.
 // `events` is the replay log, sorted by tick:
 //   { tick, beat, seat, type: 'cue', action: 'in' | 'out', id }
 //   { tick, beat, seat, type: 'volume', level }
@@ -16,8 +14,6 @@ import { partNotes, STEPS_PER_BEAT } from './part.js'
 
 if (import.meta.env.DEV) window.Tone = Tone // for poking at the Transport from devtools
 
-// Note-editor timing (see /protocol): a part is LOOP_STEPS 16th-note steps.
-const LOOP_STEPS = 32
 
 const T = Tone.getTransport()
 const Draw = Tone.getDraw()
@@ -106,21 +102,12 @@ function load(p) {
 
   const ticksPerStep = T.PPQ / STEPS_PER_BEAT
   for (const pl of p.players) {
-    const inst = instruments.create(pl.instrument, master, { key: p.key })
-    const { events, loopEnd } = partEvents(pl.pattern)
-    const part = new Tone.Part((time, ev) => {
-      if (!isOn(pl.seat, Math.round(T.getTicksAtTime(time)))) return
-      ev.rows.forEach((row) => inst.play(row, time, ev.duration))
-      Draw.schedule(() => store.bumpHit(pl.seat), time)
-    }, events)
-    part.loop = true
-    part.loopEnd = loopEnd
     // Grid parts loop every bar in 8ths; note-editor parts every 2 bars in 16ths, with
     // held notes and optionally a different instrument per note. partNotes unifies them.
     const { loopSteps, notes } = partNotes(pl.pattern)
     const insts = {}
     for (const name of new Set([pl.instrument, ...notes.map((n) => n.instrument || pl.instrument)])) {
-      insts[name] = voiceFor(name)(master, { key: p.key })
+      insts[name] = instruments.create(name, master, { key: p.key })
     }
 
     // One event per step that has notes on it.
@@ -130,7 +117,7 @@ function load(p) {
     const part = new Tone.Part((time, ev) => {
       if (!isOn(pl.seat, Math.round(T.getTicksAtTime(time)))) return
       for (const n of ev.notes) {
-        const dur = n.fromGrid ? undefined : Tone.Ticks(n.length * ticksPerStep).toSeconds()
+        const dur = Tone.Ticks(n.length * ticksPerStep).toSeconds()
         insts[n.instrument || pl.instrument].play(n.row, time, dur)
       }
       Draw.schedule(() => store.bumpHit(pl.seat), time)
@@ -155,29 +142,6 @@ function load(p) {
   }, '4n', 0)
 
   p.events.forEach(scheduleEvent)
-}
-
-// The Part events for one pattern. Call after T.bpm is set: durations are in seconds.
-function partEvents(pattern) {
-  const sixteenth = T.PPQ / 4 // ticks
-  if (pattern.notes?.length) {
-    return {
-      events: pattern.notes.map((n) => ({
-        time: `${n.start * sixteenth}i`,
-        rows: [n.row],
-        duration: Tone.Ticks(n.length * sixteenth).toSeconds(),
-      })),
-      loopEnd: `${LOOP_STEPS * sixteenth}i`,
-    }
-  }
-  // Old grid: one event per step that has any lit rows. Step n is n eighth notes into the bar.
-  const eighth = Tone.Time('8n').toSeconds()
-  const events = []
-  for (let step = 0; step < 8; step++) {
-    const rows = [0, 1, 2, 3, 4].filter((r) => pattern.grid?.[r]?.[step])
-    if (rows.length) events.push({ time: `0:${Math.floor(step / 2)}:${(step % 2) * 2}`, rows, duration: eighth })
-  }
-  return { events, loopEnd: '1m' }
 }
 
 function teardown() {
