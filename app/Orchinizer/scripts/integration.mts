@@ -31,12 +31,13 @@ test('phone lobby → token reconnect → two conductor rounds → scores → re
     function phone(name: string, room = '') {
       const changes = new EventEmitter(), sockets: WebSocket[] = [];
       class Socket extends WebSocket { constructor(address: string) { super(address); sockets.push(this); } }
-      const api: any = {}; let subscribed = false, wake = () => {};
+      const api: any = {}; let subscribed = false;
       runInNewContext(source, {
         exports: api, WebSocket: Socket, process: { env: { EXPO_PUBLIC_SERVER_URL: url } },
-        setTimeout, clearTimeout, setInterval, clearInterval,
+        // unref: net.ts's keepalive interval never stops, and must not keep the test process alive.
+        setTimeout, clearTimeout, setInterval: (f: () => void, ms: number) => setInterval(f, ms).unref(), clearInterval,
         require: (name: string) => {
-          if (name === 'react-native') return { AppState: { addEventListener: (_: string, f: (s: string) => void) => { wake = () => { f('background'); f('active'); }; } } };
+          if (name === 'react-native') return { AppState: { addEventListener: () => {} } };
           assert.equal(name, 'react');
           return { useSyncExternalStore: (subscribe: any, getSnapshot: any) => {
             if (!subscribed) { subscribed = true; subscribe(() => changes.emit('change')); }
@@ -51,7 +52,7 @@ test('phone lobby → token reconnect → two conductor rounds → scores → re
         changes.on('change', check); check();
       });
       api.useNet(); api.connect(name, room);
-      const p = { api, wait, sockets, wake: () => wake() }; phones.push(p); return p;
+      const p = { api, wait, sockets }; phones.push(p); return p;
     }
     const host = phone('Host');
     const initial = await host.wait(s => s.state?.players.length === 1), room = initial.state.room;
@@ -82,12 +83,6 @@ test('phone lobby → token reconnect → two conductor rounds → scores → re
     await host.wait(s => s.state.notes?.[guestSeat]?.[0]?.start === 2);
     guest.sockets[0].close(); await guest.wait(s => !s.connected);
     assert.equal((await guest.wait(s => s.connected && s.state.notes?.[guestSeat]?.[0]?.start === 2)).seat, guestSeat);
-    // Unlocking the phone swaps in a fresh socket and rejoins the same seat.
-    const before = guest.sockets.length; guest.wake();
-    assert.equal(guest.sockets.length, before + 1);
-    const fresh = guest.sockets.at(-1)!;
-    const welcome = await new Promise<any>(r => fresh.addEventListener('message', e => { const m = JSON.parse(String(e.data)); if (m.type === 'welcome') r(m); }));
-    assert.equal(welcome.seat, guestSeat);
     // The guest is the only human composing (the host conducts), so their Done ends compose early.
     guest.api.send({ type: 'done', done: true }); await host.wait(s => s.state.phase === 'calibrate');
     host.api.send({ type: 'calibrated', angles: {} }); await host.wait(s => s.state.phase === 'perform');

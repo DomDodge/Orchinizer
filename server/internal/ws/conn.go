@@ -66,6 +66,9 @@ func Handler(reg *game.Registry, log *slog.Logger) http.HandlerFunc {
 	}
 }
 
+// pong is the reply to every ping.
+var pong, _ = json.Marshal(protocol.Envelope{Type: protocol.TypePong})
+
 func (c *conn) readLoop(ctx context.Context, reg *game.Registry, log *slog.Logger) {
 	var room *game.Room
 	defer func() {
@@ -88,6 +91,12 @@ func (c *conn) readLoop(ctx context.Context, reg *game.Registry, log *slog.Logge
 			continue
 		}
 
+		if env.Type == protocol.TypePing {
+			// Keepalive, answered here so it works before join and never
+			// waits on a busy room.
+			c.Send(pong)
+			continue
+		}
 		if room != nil {
 			room.PostMessage(c, env.Type, data)
 			continue

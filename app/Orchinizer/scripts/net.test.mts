@@ -12,6 +12,8 @@ const source = ts.transpileModule(readFileSync(new URL('../src/net.ts', import.m
 function client(serverUrl = 'ws://localhost:8080/ws') {
   const sockets: FakeSocket[] = [];
   const retries: (() => void)[] = [];
+  const intervals: (() => void)[] = [];
+  const appState: ((s: string) => void)[] = [];
   class FakeSocket {
     static OPEN = 1;
     readyState = 1;
@@ -26,18 +28,19 @@ function client(serverUrl = 'ws://localhost:8080/ws') {
   }
   const exports: Record<string, any> = {};
   runInNewContext(source, {
-    exports, WebSocket: FakeSocket, process: { env: { EXPO_PUBLIC_SERVER_URL: serverUrl } },
+    exports, Date, WebSocket: FakeSocket, process: { env: { EXPO_PUBLIC_SERVER_URL: serverUrl } },
     setTimeout: (f: () => void) => retries.push(f),
+    setInterval: (f: () => void) => intervals.push(f),
     require: (name: string) => {
+      if (name === 'react-native') return { AppState: { addEventListener: (_e: string, f: (s: string) => void) => appState.push(f) } };
       if (name === 'react') return { useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot() };
-      if (name === 'react-native') return { AppState: { addEventListener: () => {} } };
       throw new Error(`Unexpected import: ${name}`);
     },
   });
   exports.connect('Ana', 'ABCD');
   const socket = sockets[0];
   socket?.onopen();
-  return { net: exports, socket, retries, sockets };
+  return { net: exports, socket, retries, sockets, intervals, appState };
 }
 
 test('kicked client returns home, keeps the removal message and never retries', () => {
@@ -109,4 +112,47 @@ test('serverTime drives countdowns using the shared protocol', () => {
  const time = Date.now()+30000;
  socket.receive({ type: 'state', serverTime: time, players: [] });
  assert.ok(Math.abs(net.serverNow()-time)<1000);
+});
+
+test('a quiet socket is pinged, and a dead one is replaced by a rejoin with the seat token', () => {
+  const { net, socket, sockets, intervals } = client();
+  socket.receive({ type: 'welcome', room: 'ABCD', seat: 2, token: 'seat-token' });
+  socket.receive({ type: 'state', serverTime: Date.now(), players: [] });
+  assert.equal(intervals.length, 1);
+  net.checkAlive(Date.now() + net.PING_MS);
+  assert.deepEqual(socket.sent.at(-1), { type: 'ping' });
+  assert.equal(sockets.length, 1, 'a socket heard from recently is kept');
+
+  // No pong, no onclose: the phone slept and the socket died silently.
+  net.checkAlive(Date.now() + net.DEAD_MS + 1000);
+  assert.equal(socket.readyState, 3, 'the dead socket is closed');
+  assert.equal(sockets.length, 2);
+  socket.onclose(); // a late close from the dead socket must not start a second reconnect
+  sockets[1].onopen();
+  const rejoin = sockets[1].sent[0] as { type: string; room: string; token: string };
+  assert.equal(rejoin.type, 'join');
+  assert.equal(rejoin.token, 'seat-token');
+  assert.equal(sockets.length, 2);
+});
+
+test('coming back to the foreground after a long sleep reconnects right away', () => {
+  const { socket, sockets, appState } = client();
+  socket.receive({ type: 'welcome', room: 'ABCD', seat: 2, token: 'seat-token' });
+  socket.receive({ type: 'state', serverTime: Date.now(), players: [] });
+  const realNow = Date.now;
+  Date.now = () => realNow() + 60_000; // a minute in the background
+  try {
+    appState.forEach((f) => f('active'));
+  } finally {
+    Date.now = realNow;
+  }
+  assert.equal(sockets.length, 2);
+});
+
+test('no keepalive reconnects after leaving', () => {
+  const { net, socket, sockets } = client();
+  socket.receive({ type: 'state', serverTime: Date.now(), players: [] });
+  net.leave();
+  net.checkAlive(Date.now() + 60_000);
+  assert.equal(sockets.length, 1);
 });

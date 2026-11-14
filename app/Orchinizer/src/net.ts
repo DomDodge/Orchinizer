@@ -29,6 +29,35 @@ const rejectListeners = new Set<(message: string) => void>();
 export const onPatternRejected = (f: (message: string) => void) => (rejectListeners.add(f), () => void rejectListeners.delete(f));
 
 let ws: WebSocket | null = null;
+
+// Keepalive. A locked or backgrounded phone can lose its socket without onclose ever firing, which
+// left players stuck on an old screen (e.g. compose after the round moved on). So we ping every
+// PING_MS; the server answers every ping, and any message counts as a sign of life. Silence for
+// DEAD_MS means the socket is dead: drop it and rejoin with the seat token.
+export const PING_MS = 5000;
+export const DEAD_MS = 15000;
+let lastHeard = 0;
+let keepalive: ReturnType<typeof setInterval> | null = null;
+
+/** Pings a live socket, or replaces one that has gone quiet. Runs every PING_MS and when the app returns to the foreground. */
+export function checkAlive(now = Date.now()) {
+  if (!join || !ws) return; // not in a room, or a reconnect is already pending
+  if (now - lastHeard > DEAD_MS && (snap.state || join.token)) {
+    const dead = ws;
+    ws = null; // its handlers ignore everything from here on
+    dead.close();
+    set({ connected: false });
+    open();
+    return;
+  }
+  send({ type: 'ping' });
+}
+
+function startKeepalive() {
+  if (keepalive) return;
+  keepalive = setInterval(() => checkAlive(), PING_MS);
+  AppState.addEventListener('change', (s) => s === 'active' && checkAlive());
+}
 let join: { name: string; room: string; token?: string } | null = null; // room '' = host
 
 /** No room = host a new one. */
@@ -53,6 +82,8 @@ function open() {
   }
   let welcomed = false;
   ws = sock;
+  lastHeard = Date.now(); // give a new socket the full DEAD_MS to open
+  startKeepalive();
   sock.onopen = () => {
     if (ws !== sock) return;
     set({ connected: true });
@@ -60,6 +91,7 @@ function open() {
   };
   sock.onmessage = (e) => {
     if (ws !== sock) return;
+    lastHeard = Date.now();
     const m: ServerMsg = JSON.parse(String(e.data));
     if (m.type === 'state') {
       offset = m.serverTime - Date.now();
@@ -100,21 +132,6 @@ function open() {
     if (join) setTimeout(() => join && !ws && open(), 1000);
   };
 }
-
-// A locked phone's socket is often dead without a close event yet: reconnect as soon as the app is back.
-// Only after 'background': 'inactive' (Control Center, notifications) keeps the socket alive.
-let away = false;
-AppState.addEventListener('change', (st) => {
-  if (st === 'background') away = true;
-  if (st !== 'active' || !away) return;
-  away = false;
-  if (!join?.token) return;
-  // Don't close the old socket: the server would count that as leaving (ending compose early).
-  // The token rejoin replaces it on the server, and its handlers go quiet once ws moves on.
-  ws = null;
-  set({ connected: false }); // sends are dropped until the new socket opens
-  open();
-});
 
 export function leave() {
   send({ type: 'leave' });
