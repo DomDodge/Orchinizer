@@ -21,8 +21,7 @@ const VISIBLE_ROWS = 8; // the rest scroll
 const LABEL_W = 44;
 const HANDLE_W = 22; // touch area on a note's right edge for stretching
 const HOLD_MS = 450; // hold a note still this long to delete it
-const MOVE_SLOP = 6; // px the finger must travel before a hold becomes a drag
-const EDGE_SLOP = 2;
+const MOVE_SLOP = 12; // px the finger must travel before a hold becomes a drag (a still finger drifts a few)
 const HINT_MS = 2500;
 
 /** Another player's note on the shared sheet, drawn read-only in their color. */
@@ -296,15 +295,13 @@ function NoteView({
     const t: Touch = { kind, x0: e.nativeEvent.pageX, y0: e.nativeEvent.pageY, dragging: false, deleted: false };
     touch.current = t;
     onHold(true);
-    // Holding the body still deletes the note; the stretch handle only stretches.
-    if (kind === 'move') {
-      holdTimer.current = setTimeout(() => {
-        holdTimer.current = null;
-        t.deleted = true;
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        commit(remove(notes, note.id));
-      }, HOLD_MS);
-    }
+    // Holding still anywhere on the note deletes it. Short notes are mostly stretch handle, so it counts too.
+    holdTimer.current = setTimeout(() => {
+      holdTimer.current = null;
+      t.deleted = true;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      commit(remove(notes, note.id));
+    }, HOLD_MS);
   };
 
   const track = (e: GestureResponderEvent) => {
@@ -312,7 +309,7 @@ function NoteView({
     if (!t || t.deleted) return;
     const dx = e.nativeEvent.pageX - t.x0;
     const dy = e.nativeEvent.pageY - t.y0;
-    if (!t.dragging && Math.hypot(dx, dy) < (t.kind === 'move' ? MOVE_SLOP : EDGE_SLOP)) return;
+    if (!t.dragging && Math.hypot(dx, dy) < MOVE_SLOP) return;
     if (!t.dragging) clearHold();
     t.dragging = true;
     setDrag({ kind: t.kind, dx, dy: t.kind === 'move' ? dy : 0 });

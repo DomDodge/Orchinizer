@@ -55,6 +55,7 @@ type player struct {
 	steps      protocol.Grid
 	notes      []protocol.Note // note-editor part; nil for grid-only phones and bots
 	noteCount  int
+	done       bool // tapped Done in compose
 
 	lastPattern time.Time // last pattern broadcast, for patternChanged
 }
@@ -87,6 +88,7 @@ type Room struct {
 	// Last accepted select/volume, for the 10/s limit.
 	lastSelect, lastVolume time.Time
 	aimSeat                int  // conductor's latest select, even when rate-limited
+	waitingForConductor    bool // calibrate is paused until the conductor reconnects
 	flushPending           bool // an evFlush is on its way
 
 	// The game: conductors in order (fixed at start), the round in
@@ -218,6 +220,9 @@ func (r *Room) onJoin(c Client, j protocol.Join) {
 			p.client = c
 			r.welcomePlayer(p)
 			r.log.Info("player reconnected", "seat", p.seat, "name", p.name)
+			if r.phase == protocol.PhaseCalibrate && p.seat == r.conductor && r.waitingForConductor {
+				r.calibrateClock() // they're back: give them the full calibration time
+			}
 			r.broadcastState()
 			return
 		}
@@ -292,6 +297,14 @@ func (r *Room) onLeave(c Client) {
 	// starts are removed then.
 	p.client = nil
 	r.log.Info("player disconnected", "seat", p.seat, "name", p.name, "phase", r.phase)
+	if r.phase == protocol.PhaseCalibrate && p.seat == r.conductor {
+		r.calibrateClock() // don't let calibration run out while the conductor's phone is away
+	}
+	if r.phase == protocol.PhaseCompose && r.composeDone() {
+		r.log.Info("everyone left is done composing", "round", r.round)
+		r.advance() // the last one still writing left; don't make the rest wait out the timer
+		return
+	}
 	r.broadcastState()
 }
 
@@ -341,7 +354,7 @@ func (r *Room) state() protocol.State {
 		s.Players = append(s.Players, protocol.PlayerState{
 			Seat: p.seat, Name: p.name, Color: p.color, Instrument: p.instrument,
 			Connected: p.connected(), Bot: p.bot,
-			NoteCount: p.noteCount, Level: p.level,
+			NoteCount: p.noteCount, Level: p.level, Done: p.done || p.bot,
 		})
 	}
 	return s
