@@ -7,7 +7,6 @@ import Calibrate from './screens/Calibrate.jsx'
 import Perform from './screens/Perform.jsx'
 import Compose from './screens/Compose.jsx'
 import NextRound from './screens/NextRound.jsx'
-import Vote from './screens/Vote.jsx'
 import Results from './screens/Results.jsx'
 import DebugOverlay from './debug/DebugOverlay.jsx'
 
@@ -18,7 +17,6 @@ const SCREENS = {
   calibrate: Calibrate,
   perform: Perform,
   next_round: NextRound,
-  vote: Vote,
   results: Results,
 }
 

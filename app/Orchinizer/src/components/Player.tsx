@@ -1,11 +1,11 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { send, useSecondsLeft, useNet } from '../net';
 import { instrumentInfo, type Player, type State } from '../protocol';
 import { rankPerformances, scoreAccuracy } from '../scoring';
 import { BeatRing } from './Pulse';
-import { BG, Btn, DIM, FG, H1, P, Screen, SeatBadge, Timer } from './ui';
+import { BG, Btn, FG, H1, P, Screen, SeatBadge, Timer } from './ui';
 
 /** Everyone except the conductor during calibrate: show the seat number big so the conductor can find you. */
 export function HoldUp({ state, me }: { state: State; me: Player }) {
@@ -57,42 +57,6 @@ export function Playing({ state, me }: { state: State; me: Player }) {
   );
 }
 
-export function Vote({ state, me }: { state: State; me: Player }) {
-  const left = useSecondsLeft(state.deadline);
-  const [mine, setMine] = useState(0);
-  return (
-    <Screen>
-      <H1>🗳️ Best performance?</H1>
-      <Timer left={left} />
-      {state.performances.some(p => p.score) && <P>Votes break tied scores.</P>}
-      <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: 12 }}>
-        {state.performances.map((pf) => {
-          const own = pf.conductorSeat === me.seat;
-          const color = state.players.find((p) => p.seat === pf.conductorSeat)?.color ?? FG;
-          return (
-            <Pressable
-              key={pf.round}
-              disabled={own}
-              onPress={() => {
-                setMine(pf.round);
-                send({ type: 'vote', round: pf.round });
-                Haptics.selectionAsync();
-              }}
-              style={[styles.vote, { borderColor: color, backgroundColor: mine === pf.round ? color : 'transparent', opacity: own ? 0.35 : 1 }]}
-            >
-              <Text style={[styles.voteName, { color: mine === pf.round ? BG : color }]}>{pf.conductorName}</Text>
-              <Text style={{ color: mine === pf.round ? BG : DIM }}>
-                Round {pf.round} · key of {pf.key} · {own ? 'yours' : `${pf.votes} votes`}
-              </Text>
-              {pf.score && <Text style={{ color: mine === pf.round ? BG : color }}>{pf.score.points} points · best combo {pf.score.maxCombo}</Text>}
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-    </Screen>
-  );
-}
-
 export function Results({ state }: { state: State }) {
   const { seat } = useNet();
   const win = state.performances.find((p) => p.round === state.winner);
@@ -103,14 +67,14 @@ export function Results({ state }: { state: State }) {
       <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', gap: 14 }}>
         <Text style={styles.crown}>👑</Text>
         <H1 color={color}>{win ? `${win.conductorName} wins!` : 'Show’s over'}</H1>
-        {win && <P>{win.score ? `${win.score.points} points · ` : ''}{win.votes} votes</P>}
+        {win?.score && <P>{win.score.points} points</P>}
         {ranked.map((performance, index) => performance.score && (
           <View key={performance.round} style={styles.scoreRow}>
             <Text style={[styles.voteName, { color: FG, fontSize: 20 }]}>{index + 1}. {performance.conductorName} · {performance.score.points}</Text>
             <P>{scoreAccuracy(performance.score)}% hits · best combo {performance.score.maxCombo} · {performance.score.misses} missed</P>
           </View>
         ))}
-        {ranked.some(p => p.score) && <P>Highest score wins. Votes break ties.</P>}
+        {ranked.some(p => p.score) && <P>Highest score wins. A tie goes to the earlier round.</P>}
         {state.host === seat && <Btn label="Back to lobby" onPress={() => send({ type: 'host_action', action: 'restart' })} />}
       </ScrollView>
     </Screen>
@@ -119,7 +83,6 @@ export function Results({ state }: { state: State }) {
 
 const styles = StyleSheet.create({
   seat: { fontSize: 160, fontWeight: '900' },
-  vote: { borderWidth: 3, borderRadius: 18, padding: 18, gap: 4 },
   voteName: { fontSize: 24, fontWeight: '900' },
   scoreRow: { borderWidth: 1, borderColor: '#33334A', borderRadius: 14, padding: 14, gap: 6 },
   crown: { fontSize: 120, textAlign: 'center' },

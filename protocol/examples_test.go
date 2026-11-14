@@ -21,8 +21,7 @@ func TestExamples(t *testing.T) {
 		TypeCalibrated: func() any { return &Calibrated{} }, TypeSelect: func() any { return &Select{} },
 		TypeCue: func() any { return &Cue{} }, TypeVolume: func() any { return &Volume{} },
 		TypeCueScheduled: func() any { return &CueScheduled{} }, TypeBar: func() any { return &Bar{} },
-		TypeVote: func() any { return &Vote{} }, TypeHostAction: func() any { return &HostAction{} },
-		TypePerformances: func() any { return &Performances{} },
+		TypeHostAction: func() any { return &HostAction{} },
 	}
 	files, _ := filepath.Glob("examples/*.json")
 	seen := map[string]bool{}

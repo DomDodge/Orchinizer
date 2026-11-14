@@ -6,6 +6,10 @@
 // position (engine.timeline()) and the store (getState()) every frame, so positions come
 // straight from the audio clock and can't drift. The landing flash is the seat's own
 // flash ring, which the engine fires through Tone.Draw.
+//
+// Conductor prompts (state.scoring.targets) fall down the same lanes in gold and touch the
+// seat at their server time `at`: a flick prompt is a pill (IN/OUT), a hold prompt a bar
+// as tall as the hold. Judged ones disappear (Perform shows the grade); misses turn grey.
 import { useEffect, useRef } from 'react'
 import { timeline, seatOn } from '../audio/engine.js'
 import { getState } from '../state/store.js'
@@ -71,6 +75,35 @@ function draw(ctx) {
       }
     }
   }
+  if (tl.running && game.scoring) drawTargets(ctx, game)
+}
+
+function drawTargets(ctx, game) {
+  const msPerPx = 60000 / game.tempo / STEPS_PER_BEAT / PX_PER_STEP
+  const nowServer = Date.now() - (game.serverOffset || 0)
+  ctx.shadowBlur = 0
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = '800 18px sans-serif'
+  for (const t of game.scoring.targets) {
+    if (t.result === 'perfect' || t.result === 'good') continue
+    const { x, y: seatY } = seatPos(t.seat)
+    const bottom = seatY - SEAT_R - 6
+    const y = bottom - (t.at - nowServer) / msPerPx // where the prompt touches the seat
+    const top = t.kind === 'hold' ? bottom - (t.end - nowServer) / msPerPx : y
+    if (top > bottom || y + 14 < LANE_TOP) continue // landed, or not in the lane yet
+    const missed = t.result === 'miss'
+    const label = missed ? 'MISS' : t.kind === 'hold' ? 'HOLD' : t.action.toUpperCase()
+    ctx.globalAlpha = Math.max(0, Math.min(1, (y - LANE_TOP) / FADE))
+    ctx.fillStyle = missed ? 'rgba(244,241,234,0.25)' : '#F2C14E'
+    const y0 = Math.max(LANE_TOP, top - 14)
+    ctx.beginPath()
+    ctx.roundRect(x - LANE_W / 2 + 4, y0, LANE_W - 8, y + 14 - y0, 14)
+    ctx.fill()
+    ctx.fillStyle = '#0E1020'
+    ctx.fillText(label, x, y + 1)
+  }
+  ctx.globalAlpha = 1
 }
 
 export default function NoteLanes() {

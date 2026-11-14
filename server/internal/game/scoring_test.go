@@ -182,30 +182,23 @@ func TestRoomScoringAuthorityPersistenceAndReset(t *testing.T) {
 	}
 }
 
-func TestScoreWinnerUsesPointsThenVotesThenRound(t *testing.T) {
+func TestScoreWinnerUsesPointsThenRound(t *testing.T) {
 	r := newTestRoom()
 	joinTV(r)
 	joinPlayer(r, "Ada")
 	joinPlayer(r, "Bob")
-	r.performances = []protocol.Performance{
+	r.performances = []protocol.PerformanceSummary{
 		{Round: 1, ConductorSeat: 1, Score: &protocol.ScoreSummary{Points: 100}},
 		{Round: 2, ConductorSeat: 2, Score: &protocol.ScoreSummary{Points: 200}},
 	}
-	r.players[1].vote = 1
-	r.players[2].vote = 1
 	r.startResults()
-	if r.winner != 2 {
-		t.Fatal("votes beat points")
+	if r.winner != 2 || r.phase != protocol.PhaseResults {
+		t.Fatalf("most points didn't win: winner %d", r.winner)
 	}
 	r.performances[0].Score.Points = 200
 	r.startResults()
 	if r.winner != 1 {
-		t.Fatal("votes didn't break tied points")
-	}
-	r.players[1].vote = 2
-	r.startResults()
-	if r.winner != 1 {
-		t.Fatal("earlier round didn't break full tie")
+		t.Fatal("earlier round didn't break a tie")
 	}
 }
 

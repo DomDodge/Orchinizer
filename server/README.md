@@ -18,17 +18,17 @@ fly secrets set EXPO_URL=exp://xxxx-anonymous-8081.exp.direct -a orchinizer
 This restarts the machine, which **wipes rooms**, so set it before people join.
 
 ## Phase lengths
-Phase lengths can be set with environment variables, in seconds: `COMPOSE_SECONDS` (180), `CALIBRATE_SECONDS` (30, a cap), `PERFORM_SECONDS` (45), `VOTE_SECONDS` (30) and `REPLAY_SECONDS` (10, the TV's replay clip per performance; the vote lasts at least one clip each plus 5 s). `MAX_ROUNDS` caps the rounds per game (default 0: one per player, so everyone conducts; with a cap, the first players to join conduct). On Fly, set them with `fly secrets set COMPOSE_SECONDS=45` or under `[env]` in `fly.toml`.
+Phase lengths can be set with environment variables, in seconds: `COMPOSE_SECONDS` (180), `CALIBRATE_SECONDS` (30, a cap) and `PERFORM_SECONDS` (45). `MAX_ROUNDS` caps the rounds per game (default 0: one per player, so everyone conducts; with a cap, the first players to join conduct). On Fly, set them with `fly secrets set COMPOSE_SECONDS=45` or under `[env]` in `fly.toml`.
 
 A quick full game locally:
 ```sh
-COMPOSE_SECONDS=4 PERFORM_SECONDS=6 VOTE_SECONDS=8 go run ./cmd/server &
+COMPOSE_SECONDS=4 PERFORM_SECONDS=6 go run ./cmd/server &
 go run ./cmd/fakeclients -tv -start 6 -q
 ```
 
 ## Layout
 - `cmd/server`: HTTP entry point
-- `internal/game`: the room registry and one goroutine per room that owns all of that room's state. `room.go` covers connections and sending, `messages.go` the incoming messages, and `game.go` the phases, rounds, bots and votes
+- `internal/game`: the room registry and one goroutine per room that owns all of that room's state. `room.go` covers connections and sending, `messages.go` the incoming messages, and `game.go` the phases, rounds, bots and results
 - `internal/ws`: per-connection read and write goroutines with a buffered send queue. A client whose buffer fills up is dropped
 - `web/static`: the embedded TV page. The Docker build copies the `/tv` build output over it
 

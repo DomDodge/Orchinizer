@@ -5,7 +5,6 @@ import (
 	"io"
 	"log/slog"
 	"testing"
-	"time"
 
 	"orchinizer/protocol"
 )
@@ -52,9 +51,7 @@ func (f *fakeClient) lastError() string {
 // The room is driven synchronously: handle() and onDeadline() run on the
 // test goroutine, the same way run() would call them.
 func newTestRoom() *Room {
-	t := DefaultTimings
-	t.ReplayClip = 0 // most tests check that the vote ends as soon as everyone votes
-	return newRoom("TEST", nil, slog.New(slog.NewTextHandler(io.Discard, nil)), t)
+	return newRoom("TEST", nil, slog.New(slog.NewTextHandler(io.Discard, nil)), DefaultTimings)
 }
 
 func send(r *Room, c Client, v any) {
@@ -188,35 +185,14 @@ func TestFullGame(t *testing.T) {
 	if tv.state(t).Phase != protocol.PhasePerform {
 		t.Fatal("calibrate timeout didn't start perform")
 	}
-	r.onDeadline() // perform -> vote (every player has conducted)
+	r.onDeadline() // perform -> results (every player has conducted)
 
 	s = tv.state(t)
-	if s.Phase != protocol.PhaseVote || len(s.Performances) != 2 {
-		t.Fatalf("vote: %+v", s)
-	}
-	var perfs protocol.Performances
-	if !tv.last(protocol.TypePerformances, &perfs) || len(perfs.List) != 2 {
-		t.Fatalf("tv performances: %+v", perfs)
-	}
-	if len(perfs.List[0].Cues) != 1 || perfs.List[0].Cues[0].Beat != 4 || perfs.List[0].ConductorName != "Ada" {
-		t.Fatalf("round 1 replay log: %+v", perfs.List[0])
-	}
-
-	// Can't vote for your own performance; voting for the other one works,
-	// and the vote ends as soon as everyone has voted.
-	send(r, ada, protocol.Vote{Envelope: protocol.Envelope{Type: protocol.TypeVote}, Round: 1})
-	if ada.lastError() == "" {
-		t.Fatal("voted for own performance")
-	}
-	send(r, ada, protocol.Vote{Envelope: protocol.Envelope{Type: protocol.TypeVote}, Round: 2})
-	if tv.state(t).Phase != protocol.PhaseVote {
-		t.Fatal("vote ended before bob voted")
-	}
-	send(r, bob, protocol.Vote{Envelope: protocol.Envelope{Type: protocol.TypeVote}, Round: 1})
-	s = tv.state(t)
-	// 1 vote each: the tie goes to the earlier round.
-	if s.Phase != protocol.PhaseResults || s.Winner != 1 {
+	if s.Phase != protocol.PhaseResults || len(s.Performances) != 2 || s.Performances[0].ConductorName != "Ada" {
 		t.Fatalf("results: %+v", s)
+	}
+	if s.Performances[0].Score == nil || s.Winner == 0 {
+		t.Fatalf("results missing scores or a winner: %+v", s)
 	}
 
 	// next from results -> lobby, bots removed, humans kept.
@@ -246,20 +222,14 @@ func TestDisconnectedConductorIsSkippedAndStartDropsLeavers(t *testing.T) {
 			t.Fatal("C still seated")
 		}
 	}
-	// B drops mid-game; when round 2 comes, B's round is skipped -> vote.
+	// B drops mid-game; when round 2 comes, B's round is skipped -> results.
 	r.handle(event{kind: evLeave, client: b})
 	r.onDeadline() // compose -> calibrate
 	r.onDeadline() // calibrate -> perform
-	r.onDeadline() // perform -> (B skipped) -> vote
-	// A conducted the only performance and B is gone: nobody can vote, so
-	// the vote ends at once and results follow.
+	r.onDeadline() // perform -> (B skipped) -> results
 	s = tv.state(t)
 	if s.Phase != protocol.PhaseResults || len(s.Performances) != 1 || s.Winner != 1 {
 		t.Fatalf("expected results with 1 performance: %+v", s)
-	}
-	var perfs protocol.Performances
-	if !tv.last(protocol.TypePerformances, &perfs) || len(perfs.List) != 1 {
-		t.Fatal("tv didn't get performances")
 	}
 }
 
@@ -274,7 +244,7 @@ func TestSkipAndRestart(t *testing.T) {
 	r.onDeadline() // calibrate -> perform
 	host(r, tv, protocol.HostSkip)
 	s := tv.state(t)
-	if s.Phase != protocol.PhaseVote || len(s.Performances) != 1 {
+	if s.Phase != protocol.PhaseResults || len(s.Performances) != 1 {
 		t.Fatalf("skip during perform: %+v", s)
 	}
 	host(r, tv, protocol.HostRestart)
@@ -347,37 +317,6 @@ func TestSelectRateLimit(t *testing.T) {
 	}
 }
 
-// With replays on, everyone voting early pulls the deadline in to the end of
-// the replays instead of cutting them off.
-func TestVoteWaitsForReplays(t *testing.T) {
-	r := newTestRoom()
-	r.timings.ReplayClip = 10 * time.Second
-	r.timings.Vote = 5 * time.Second
-	tv := joinTV(r)
-	a, b := joinPlayer(r, "A"), joinPlayer(r, "B")
-	host(r, tv, protocol.HostStart)
-	for range 6 { // 2 rounds: compose, calibrate, perform each
-		r.onDeadline()
-	}
-	s := tv.state(t)
-	if s.Phase != protocol.PhaseVote {
-		t.Fatalf("phase %s", s.Phase)
-	}
-	// 2 replays x 10 s + 5 s pad = 25 s, longer than the 5 s vote.
-	if left := time.Until(time.UnixMilli(s.Deadline)); left < 24*time.Second || left > 26*time.Second {
-		t.Fatalf("vote deadline in %v, want ~25s", left)
-	}
-	send(r, a, protocol.Vote{Envelope: protocol.Envelope{Type: protocol.TypeVote}, Round: 2})
-	send(r, b, protocol.Vote{Envelope: protocol.Envelope{Type: protocol.TypeVote}, Round: 1})
-	if tv.state(t).Phase != protocol.PhaseVote {
-		t.Fatal("vote ended before the replays finished")
-	}
-	r.onDeadline()
-	if tv.state(t).Phase != protocol.PhaseResults {
-		t.Fatal("no results after the replays")
-	}
-}
-
 func TestMaxRounds(t *testing.T) {
 	r := newTestRoom()
 	r.timings.MaxRounds = 2
@@ -398,8 +337,8 @@ func TestMaxRounds(t *testing.T) {
 	for range 3 {
 		r.onDeadline()
 	}
-	if s := tv.state(t); s.Phase != protocol.PhaseVote || len(s.Performances) != 2 {
-		t.Fatalf("expected the vote after 2 rounds: %+v", s.Phase)
+	if s := tv.state(t); s.Phase != protocol.PhaseResults || len(s.Performances) != 2 {
+		t.Fatalf("expected results after 2 rounds: %+v", s.Phase)
 	}
 }
 

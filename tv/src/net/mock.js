@@ -10,7 +10,7 @@ const KEYS = [['C', 96], ['G', 104], ['F', 88], ['D', 112], ['A', 100], ['Bb', 1
 const ROUNDS = Number(new URLSearchParams(location.search).get('rounds')) || 3
 
 // Base phase lengths in ms (scaled by ?speed=).
-const LEN = { compose: 12000, calibrate: 7000, perform: 45000, votePerRound: 10000 }
+const LEN = { compose: 12000, calibrate: 7000, perform: 45000 }
 
 const rand = (n) => Math.floor(Math.random() * n)
 const pick = (a) => a[rand(a.length)]
@@ -60,6 +60,7 @@ export function createMockServer(deliver) {
       notes,
       performances: s.performances || [],
       winner: s.winner || 0,
+      scoring: s.phase === 'perform' ? s.scoring : undefined,
     })
   const phase = (name, len, extra = {}) => {
     clear()
@@ -80,7 +81,7 @@ export function createMockServer(deliver) {
       later(700 * (i + 1), () => {
         players.push({
           seat: i + 1, name, color: SEAT_COLORS[i], instrument: INSTRUMENTS[i],
-          connected: true, bot: false, noteCount: 0, playing: false, voted: false,
+          connected: true, bot: false, noteCount: 0, playing: false,
         })
         pushState()
       }),
@@ -121,15 +122,48 @@ export function createMockServer(deliver) {
   }
 
   function perform() {
-    phase('perform', LEN.perform)
+    // A chart shaped like the server's: a prompt every bar after one beat of lead-in,
+    // seats in turn, each alternating in/out, every 4th a 3-beat hold.
+    const beatMs = 60000 / s.tempo
+    const start = Date.now()
     const seats = performers().map((p) => p.seat)
+    const targets = []
+    const on = {}
+    for (let i = 0, beat = 4; seats.length && (beat + 4) * beatMs < LEN.perform * MOCK_SPEED; i++, beat += 4) {
+      const seat = seats[i % seats.length]
+      const at = start + beat * beatMs
+      if (i % 4 === 3) targets.push({ id: i, kind: 'hold', seat, at, end: at + 3 * beatMs, result: 'pending' })
+      else {
+        on[seat] = !on[seat]
+        targets.push({ id: i, kind: 'flick', seat, action: on[seat] ? 'in' : 'out', at, result: 'pending' })
+      }
+    }
+    s.scoring = { summary: { points: 0, maxCombo: 0, perfect: 0, good: 0, misses: 0, total: targets.length }, combo: 0, targets }
+    phase('perform', LEN.perform)
     const playing = new Set()
     const cue = (seat, action) => {
       action === 'in' ? playing.add(seat) : playing.delete(seat)
       emit('cue', { id: `m${++cueId}`, seat, action })
     }
-    later(500, () => cue(seats[0], 'in'))
-    later(900, () => cue(seats[1], 'in'))
+    // The fake conductor hits most prompts (real ms: the music doesn't speed up). Grades are
+    // a dice roll; the real server judges cue arrival times. No combo multiplier here.
+    const sum = s.scoring.summary
+    for (const t of targets) {
+      const roll = Math.random()
+      timers.push(
+        setTimeout(() => {
+          if (t.kind === 'flick' && roll >= 0.2) cue(t.seat, t.action)
+          t.result = roll < 0.2 ? 'miss' : roll < 0.65 ? 'perfect' : 'good'
+          const points = { perfect: 100, good: 50, miss: 0 }[t.result]
+          s.scoring.combo = t.result === 'miss' ? 0 : s.scoring.combo + 1
+          sum.maxCombo = Math.max(sum.maxCombo, s.scoring.combo)
+          sum.points += points
+          t.result === 'miss' ? sum.misses++ : sum[t.result]++
+          s.scoring.last = { targetId: t.id, result: t.result, points, at: Date.now() }
+          pushState()
+        }, (t.end || t.at) - start),
+      )
+    }
     let pointed = seats[0]
     const level = Object.fromEntries(seats.map((x) => [x, 80]))
     every(100, () => {
@@ -140,33 +174,19 @@ export function createMockServer(deliver) {
         emit('volume', { seat: pointed, level: level[pointed] })
       }
     })
-    every(2200, () => {
-      const seat = pick(seats)
-      cue(seat, playing.has(seat) && playing.size > 1 ? 'out' : 'in')
-    })
     nextPhase = () => {
       const c = players.find((p) => p.seat === s.conductor)
-      s.performances.push({ round: s.round, conductorSeat: s.conductor, conductorName: c?.name || '', key: s.key, tempo: s.tempo, votes: 0 })
-      s.round < ROUNDS ? compose(s.round + 1) : vote()
+      for (const t of targets) if (t.result === 'pending') (t.result = 'miss'), sum.misses++
+      s.performances.push({ round: s.round, conductorSeat: s.conductor, conductorName: c?.name || '', key: s.key, tempo: s.tempo, score: { ...sum } })
+      s.round < ROUNDS ? compose(s.round + 1) : results()
     }
     later(LEN.perform, nextPhase)
   }
 
-  function vote() {
-    // Not shortened by ?speed=: replay clips always take a real 10 s each.
-    const len = (LEN.votePerRound * s.performances.length + 5000) / MOCK_SPEED
-    phase('vote', len, { conductor: 0 })
-    every(1500, () => {
-      pick(s.performances).votes++
-      pushState()
-    })
-    nextPhase = results
-    later(len, results)
-  }
-
   function results() {
-    const winner = s.performances.reduce((a, b) => (b.votes > a.votes ? b : a)).round
-    phase('results', null, { winner })
+    const pts = (pf) => pf.score?.points ?? 0
+    const winner = s.performances.reduce((a, b) => (pts(b) > pts(a) ? b : a)).round
+    phase('results', null, { winner, conductor: 0 })
     nextPhase = lobby
   }
 

@@ -18,4 +18,4 @@ export const HTTP_URL = WS_URL.replace(/^ws/, 'http').replace(/\/ws$/, '')
 
 export const SEAT_COLORS = ['#FF6B5A', '#FFB23E', '#A8E05F', '#2ED3B7', '#4DA8FF', '#A78BFA', '#FF7AC0', '#F1E6D2']
 
-export const PHASES = ['lobby', 'compose', 'calibrate', 'perform', 'next_round', 'vote', 'results']
+export const PHASES = ['lobby', 'compose', 'calibrate', 'perform', 'next_round', 'results']

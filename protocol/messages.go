@@ -22,9 +22,7 @@ const (
 	TypeVolume       = "volume"        // conductor -> server -> tv
 	TypeCueScheduled = "cue_scheduled" // tv -> server
 	TypeBar          = "bar"           // tv -> server -> players
-	TypeVote         = "vote"          // player -> server
 	TypeHostAction   = "host_action"   // tv -> server
-	TypePerformances = "performances"  // server -> tv
 )
 
 // Roles. The conductor is not a role: it is the player whose seat equals
@@ -40,7 +38,6 @@ const (
 	PhaseCompose   = "compose"
 	PhaseCalibrate = "calibrate"
 	PhasePerform   = "perform"
-	PhaseVote      = "vote"
 	PhaseResults   = "results"
 )
 
@@ -55,7 +52,7 @@ const (
 const (
 	HostStart   = "start"   // lobby -> round 1 compose
 	HostNext    = "next"    // end the current phase now
-	HostSkip    = "skip"    // skip the remaining rounds and go to the vote
+	HostSkip    = "skip"    // skip the remaining rounds and go to the results
 	HostRestart = "restart" // back to the lobby, keeping players
 )
 
@@ -129,17 +126,15 @@ type PlayerState struct {
 	Bot        bool   `json:"bot"`
 	NoteCount  int    `json:"noteCount"` // for the TV's compose tiles
 	Playing    bool   `json:"playing"`   // part is sounding (per the TV's cue_scheduled)
-	Voted      bool   `json:"voted"`
 }
 
-// PerformanceSummary is one round in the vote and results lists.
+// PerformanceSummary is one finished round and its conductor's score.
 type PerformanceSummary struct {
 	Round         int           `json:"round"`
 	ConductorSeat int           `json:"conductorSeat"`
 	ConductorName string        `json:"conductorName"`
 	Key           string        `json:"key"`
 	Tempo         int           `json:"tempo"`
-	Votes         int           `json:"votes"`
 	Score         *ScoreSummary `json:"score,omitempty"`
 }
 
@@ -198,7 +193,7 @@ type State struct {
 	Tempo       int           `json:"tempo"`       // BPM
 	Instruments []string      `json:"instruments"` // this round's group, e.g. strings
 	Players     []PlayerState `json:"players"`
-	// Filled in during the vote and results phases.
+	// Finished rounds, in round order.
 	Performances []PerformanceSummary `json:"performances"`
 	Host         int                  `json:"host"`
 	TVConnected  bool                 `json:"tvConnected"`
@@ -206,7 +201,7 @@ type State struct {
 	Patterns     map[int]Grid         `json:"patterns"`
 	Notes        map[int][]Note       `json:"notes,omitempty"` // note-editor parts by seat; seats without notes are left out
 	Live         map[int]int          `json:"live"`
-	Winner       int                  `json:"winner"` // winning round, 0 = none yet
+	Winner       int                  `json:"winner"` // round with the most points (ties go to the earlier round), 0 = none yet
 	Scoring      *RoundScoring        `json:"scoring,omitempty"`
 }
 
@@ -296,42 +291,10 @@ type Bar struct {
 	Tempo int `json:"tempo"`
 }
 
-// Vote for a round. You can't vote for a round you conducted.
-type Vote struct {
-	Envelope
-	Round int `json:"round"`
-}
-
 // HostAction: start, next, skip, or restart.
 type HostAction struct {
 	Envelope
 	Action string `json:"action"`
-}
-
-// LoggedCue is one entry in a performance's replay log.
-type LoggedCue struct {
-	ID     string `json:"id"`
-	Seat   int    `json:"seat"`
-	Action string `json:"action"`
-	Beat   int    `json:"beat"`
-}
-
-// Performance is everything the TV needs to replay one round.
-type Performance struct {
-	Round         int           `json:"round"`
-	ConductorSeat int           `json:"conductorSeat"`
-	ConductorName string        `json:"conductorName"`
-	Key           string        `json:"key"`
-	Tempo         int           `json:"tempo"`
-	Parts         []Part        `json:"parts"`
-	Cues          []LoggedCue   `json:"cues"`
-	Score         *ScoreSummary `json:"score,omitempty"`
-}
-
-// Performances goes to the TV when the vote starts.
-type Performances struct {
-	Envelope
-	List []Performance `json:"list"`
 }
 
 // Config is served as JSON at GET /config (HTTP, not WebSocket). The TV
