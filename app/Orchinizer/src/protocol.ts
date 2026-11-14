@@ -2,7 +2,7 @@
 import type { Grid as Steps } from '../../../protocol/messages.ts';
 import { ROWS, STEPS, MAJOR_PENTATONIC as SCALE } from '../../../protocol/messages.ts';
 export type { Phase, State, Grid as Steps, PlayerState as Player, PerformanceSummary as Performance,
-  ServerMessage as ServerMsg, ClientMessage as ClientMsg } from '../../../protocol/messages.ts';
+  ServerMessage as ServerMsg, ClientMessage as ClientMsg, RoundScoring, ScoreSummary } from '../../../protocol/messages.ts';
 export { ROWS, STEPS, MAJOR_PENTATONIC as SCALE } from '../../../protocol/messages.ts';
 export type Voice = 'bass' | 'pad' | 'lead' | 'drums';
 
