@@ -12,10 +12,8 @@ const source = ts.transpileModule(readFileSync(new URL('./audio.ts', import.meta
 
 const SAMPLE_STEP = 4;
 const ALL = Object.values(INSTRUMENT_GROUPS).flat();
-const KITS = ['drums', 'timpani', 'bongos'];
-// Stand-in for sounds.gen: tonal banks at semitones 0, 4, ... 20; kits one sound per row.
-const sounds = Object.fromEntries(ALL.map((id) => [id,
-  KITS.includes(id) ? [0, 1, 2].map((r) => `${id}_${r}`) : [0, 4, 8, 12, 16, 20].map((s) => `${id}_${s}`)]));
+// Stand-in for sounds.gen: banks at semitones 0, 4, ... 20.
+const sounds = Object.fromEntries(ALL.map((id) => [id, [0, 4, 8, 12, 16, 20].map((s) => `${id}_${s}`)]));
 
 type Played = { source: string; rate: number; correctPitch: boolean };
 
@@ -56,14 +54,14 @@ test('the generated sounds cover every instrument with the expected sample count
   for (const id of ALL) {
     const line = gen.split('\n').find((l) => l.startsWith(`  ${id}: [`));
     assert.ok(line, `no sounds for ${id}`);
-    assert.equal(line.match(/require\(/g)?.length, KITS.includes(id) ? 3 : 6, id);
+    assert.equal(line.match(/require\(/g)?.length, 6, id);
   }
 });
 
 test('every instrument previews all its rows in every round key, never changing the playback rate', () => {
   const { api, played } = load();
   for (const id of ALL) {
-    const rows = KITS.includes(id) ? 3 : 5;
+    const rows = 5;
     for (const key of ['C', 'G', 'F', 'D', 'A', 'E', 'Bb', 'Eb', 'B']) {
       api.preload(id, key);
       for (let row = 0; row < rows; row++) api.playNote(id, key, row);
@@ -111,7 +109,4 @@ test('playNoteFor stops a stretched note after its length, and a replay cancels 
   api.playNoteFor('cello', 'C', 0, 600);
   api.playNote('cello', 'C', 0); // tapped again before the stop: the old stop must not cut it off
   assert.equal(timers[1].cleared, true);
-
-  api.playNoteFor('bongos', 'C', 0, 600);
-  assert.equal(timers.length, 2, 'drum hits are not stopped');
 });

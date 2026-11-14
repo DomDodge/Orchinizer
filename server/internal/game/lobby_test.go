@@ -18,7 +18,7 @@ func TestLobbyChoicesAndRemoval(t *testing.T) {
 	a := lobbyPlayer(r, "Ana")
 	b := lobbyPlayer(r, "Ben")
 	c := lobbyPlayer(r, "Cat")
-	if s := a.state(t); s.Host != 1 || s.Conductor != 1 || len(s.Categories) != 4 {
+	if s := a.state(t); s.Host != 1 || s.Conductor != 1 || len(s.Categories) != 3 {
 		t.Fatalf("lobby: %+v", s)
 	}
 	pick(r, b, "violin")
@@ -27,7 +27,7 @@ func TestLobbyChoicesAndRemoval(t *testing.T) {
 		t.Fatal("duplicate pick accepted")
 	}
 	send(r, b, protocol.Categories{Envelope: protocol.Envelope{Type: protocol.TypeCategories}, Categories: []string{"wind"}})
-	if len(r.categories) != 4 {
+	if len(r.categories) != 3 {
 		t.Fatal("non-host changed categories")
 	}
 	send(r, a, protocol.Categories{Envelope: protocol.Envelope{Type: protocol.TypeCategories}, Categories: []string{"wind", "keys"}})
@@ -111,11 +111,11 @@ func TestStartValidationAndLockedLobby(t *testing.T) {
 	if r.players[2] == nil {
 		t.Fatal("kick accepted during game")
 	}
-	pick(r, b, "drums")
+	pick(r, b, "flute")
 	if r.players[2].instrument != "cello" {
 		t.Fatal("pick changed during game")
 	}
-	send(r, b, protocol.Pattern{Envelope: protocol.Envelope{Type: protocol.TypePattern}, Instrument: "drums"})
+	send(r, b, protocol.Pattern{Envelope: protocol.Envelope{Type: protocol.TypePattern}, Instrument: "flute"})
 	if r.players[2].instrument != "cello" {
 		t.Fatal("pattern bypassed instrument lock")
 	}

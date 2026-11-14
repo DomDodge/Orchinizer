@@ -14,12 +14,11 @@ const (
 )
 
 // Categories are presented in this order in every lobby.
-var CategoryNames = []string{"strings", "wind", "percussion", "keys"}
+var CategoryNames = []string{"strings", "wind", "keys"}
 var InstrumentGroups = map[string][]string{
-	"strings":    {"contrabass", "cello", "viola", "violin", "harp", "guitar"},
-	"wind":       {"flute", "clarinet", "sax", "trumpet", "trombone", "tuba"},
-	"percussion": {"drums", "timpani", "xylophone", "bongos"},
-	"keys":       {"piano", "organ", "synth"},
+	"strings": {"contrabass", "cello", "viola", "violin", "guitar"},
+	"wind":    {"flute", "clarinet", "sax", "trumpet", "trombone", "tuba"},
+	"keys":    {"piano", "organ", "synth"},
 }
 
 // SeatColors[seat-1] is that seat's color.

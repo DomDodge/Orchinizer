@@ -230,7 +230,7 @@ export interface ServerConfig {
 }
 
 /** Shared constants. The server is the source of truth; these are for display and dev. */
-export type Category = "strings" | "wind" | "percussion" | "keys";
+export type Category = "strings" | "wind" | "keys";
 export interface Categories extends Base { type: "categories"; categories: Category[] }
 export interface Pick extends Base { type: "pick"; instrument: string | null }
 export interface Leave extends Base { type: "leave" }
@@ -240,9 +240,8 @@ export interface Kicked extends Base { type: "kicked" }
 export interface Ping extends Base { type: "ping" }
 export interface Pong extends Base { type: "pong" }
 export const INSTRUMENT_GROUPS: Record<Category, string[]> = {
-  strings: ["contrabass", "cello", "viola", "violin", "harp", "guitar"],
+  strings: ["contrabass", "cello", "viola", "violin", "guitar"],
   wind: ["flute", "clarinet", "sax", "trumpet", "trombone", "tuba"],
-  percussion: ["drums", "timpani", "xylophone", "bongos"],
   keys: ["piano", "organ", "synth"],
 };
 export const SEAT_COLORS = [

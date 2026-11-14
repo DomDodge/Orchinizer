@@ -4,14 +4,11 @@ import { ROWS, STEPS, MAJOR_PENTATONIC as SCALE } from '../../../protocol/messag
 export type { Phase, State, Grid as Steps, PlayerState as Player, PerformanceSummary as Performance,
   ServerMessage as ServerMsg, ClientMessage as ClientMsg, RoundScoring, ScoreSummary } from '../../../protocol/messages.ts';
 export { ROWS, STEPS, MAJOR_PENTATONIC as SCALE } from '../../../protocol/messages.ts';
-export type Voice = 'bass' | 'pad' | 'lead' | 'drums';
-
-export const DRUM_ROWS = ['Kick', 'Snare', 'Hat'];
+export type Voice = 'bass' | 'pad' | 'lead';
 
 export const CATEGORIES = {
   strings: { label: 'Strings', emoji: '🎻' },
   wind: { label: 'Wind', emoji: '🎺' },
-  percussion: { label: 'Percussion', emoji: '🥁' },
   keys: { label: 'Keys', emoji: '🎹' },
 } as const;
 export type Category = keyof typeof CATEGORIES;
@@ -24,7 +21,6 @@ export const INSTRUMENTS: Record<string, InstrumentInfo> = {
   viola: i('Viola', '🎻', 'strings', 'pad'),
   cello: i('Cello', '🎻', 'strings', 'bass'),
   contrabass: i('Double bass', '🎻', 'strings', 'bass'),
-  harp: i('Harp', '🎶', 'strings', 'lead'),
   guitar: i('Guitar', '🎸', 'strings', 'lead'),
   flute: i('Flute', '🪈', 'wind', 'lead'),
   clarinet: i('Clarinet', '🎷', 'wind', 'lead'),
@@ -32,10 +28,6 @@ export const INSTRUMENTS: Record<string, InstrumentInfo> = {
   trumpet: i('Trumpet', '🎺', 'wind', 'lead'),
   trombone: i('Trombone', '🎺', 'wind', 'bass'),
   tuba: i('Tuba', '🎺', 'wind', 'bass'),
-  drums: i('Drums', '🥁', 'percussion', 'drums'),
-  timpani: i('Timpani', '🥁', 'percussion', 'drums'),
-  xylophone: i('Xylophone', '🎼', 'percussion', 'lead'),
-  bongos: i('Bongos', '🪘', 'percussion', 'drums'),
   piano: i('Piano', '🎹', 'keys', 'lead'),
   organ: i('Organ', '🎹', 'keys', 'pad'),
   synth: i('Synth', '🎛️', 'keys', 'pad'),

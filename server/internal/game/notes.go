@@ -93,9 +93,6 @@ const autoNotes = 8
 // on beats and keep every sheet rule; fewer are written if the sheet is full.
 func fillNotes(sheet []sheetNote, instrument string, want int, rng *rand.Rand) []protocol.Note {
 	rows := protocol.Rows
-	if isKit(instrument) {
-		rows = 3
-	}
 	var out []protocol.Note
 	starts := rng.Perm(protocol.LoopSteps / protocol.StepsPerBeat)
 	row := rng.IntN(rows)
@@ -122,7 +119,3 @@ func fillNotes(sheet []sheetNote, instrument string, want int, rng *rand.Rand) [
 	return out
 }
 
-// isKit reports whether an instrument is a drum kit, which uses rows 0-2 only.
-func isKit(instrument string) bool {
-	return instrument == "drums" || instrument == "timpani" || instrument == "bongos"
-}

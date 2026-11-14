@@ -62,7 +62,7 @@ test('phone lobby → token reconnect → two conductor rounds → scores → re
     await host.wait(s => s.state.players[0].instrument === 'piano');
     guest.api.send({ type: 'pick', instrument: 'piano' });
     await guest.wait(s => !!s.error); guest.api.clearError();
-    guest.api.send({ type: 'pick', instrument: 'cello' }); removed.api.send({ type: 'pick', instrument: 'drums' });
+    guest.api.send({ type: 'pick', instrument: 'cello' }); removed.api.send({ type: 'pick', instrument: 'flute' });
     await host.wait(s => s.state.players.every((p: any) => p.instrument));
     const removedSeat = removed.api.useNet().seat;
     removed.sockets[0].close();
