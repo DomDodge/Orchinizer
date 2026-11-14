@@ -5,7 +5,7 @@ import { setConnection } from '../state/store.js'
 import { MOCK_SPEED, SEAT_COLORS } from '../config.js'
 
 const NAMES = ['Maya', 'Theo', 'Priya', 'Jonas', 'Lena', 'Kofi']
-const INSTRUMENTS = ['contrabass', 'cello', 'viola', 'violin', 'harp', 'drums']
+const INSTRUMENTS = ['contrabass', 'cello', 'viola', 'violin', 'guitar', 'flute']
 const KEYS = [['C', 96], ['G', 104], ['F', 88], ['D', 112], ['A', 100], ['Bb', 108]]
 const ROUNDS = Number(new URLSearchParams(location.search).get('rounds')) || 3
 

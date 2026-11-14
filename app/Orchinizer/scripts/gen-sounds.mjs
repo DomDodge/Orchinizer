@@ -5,8 +5,7 @@
 // at the same octave, so a part sounds on the phone roughly as it will on the TV.
 //
 // Tonal instruments get one sample every SAMPLE_STEP semitones above C (0, 4, ... 20, enough for
-// every key's five rows); the phone tunes the rest with the playback rate. Drum kits get one
-// sample per row.
+// every key's five rows).
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 
 const SR = 22050;
@@ -31,7 +30,6 @@ const perc = (a, decay) => (t) => (t < a ? t / a : Math.exp(-(t - a) / decay));
 
 const saw = (n) => 1 / n;
 const square = (n) => (n % 2 ? 1 / n : 0);
-const triangle = (n) => (n % 2 ? 1 / (n * n) : 0);
 
 /**
  * Additive voice. Harmonic n of `wave` (or each [ratio, amp, decaySeconds] of `partials`) is
@@ -71,44 +69,6 @@ function voice(f, dur, { wave, partials, env, cutoff = 20000, damp = 0, vib, det
   return out;
 }
 
-/** A pitched drum: a sine-ish membrane whose pitch falls from `bend` above to `f`. */
-function membrane(f, dur, { decay, bend = 0.5, overtones = [], thump = 0 }) {
-  const n = Math.round(dur * SR);
-  const out = new Float64Array(n);
-  const parts = [[1, 1], ...overtones];
-  const phases = new Float64Array(parts.length);
-  for (let i = 0; i < n; i++) {
-    const t = i / SR;
-    const ft = f * (1 + bend * Math.exp(-t / 0.03));
-    let s = 0;
-    for (let k = 0; k < parts.length; k++) {
-      phases[k] += (TAU * ft * parts[k][0]) / SR;
-      s += parts[k][1] * Math.exp(-t * k * 2) * Math.sin(phases[k]);
-    }
-    out[i] = s * Math.exp(-t / decay) + thump * noise() * Math.exp(-t / 0.015);
-  }
-  return out;
-}
-
-/** Noise, optionally high-passed (a first difference), with an exponential decay. */
-function hiss(dur, decay, highpass) {
-  const n = Math.round(dur * SR);
-  const out = new Float64Array(n);
-  let prev = 0;
-  for (let i = 0; i < n; i++) {
-    const x = noise();
-    out[i] = (highpass ? x - prev : x) * Math.exp(-i / SR / decay);
-    prev = x;
-  }
-  return out;
-}
-
-const mix = (...layers) => {
-  const out = new Float64Array(Math.max(...layers.map(([l]) => l.length)));
-  for (const [l, g] of layers) for (let i = 0; i < l.length; i++) out[i] += l[i] * g;
-  return out;
-};
-
 // ---- instruments (keep octaves in step with tv/src/audio/instruments.js) ----
 
 const HELD = 0.95; // seconds per held sample; the phone stops a note early when it's shorter
@@ -125,7 +85,6 @@ const TONAL = {
   viola: [4, HELD, bowed(2600, 12)],
   cello: [3, HELD, bowed(1800, 10)],
   contrabass: [2, 0.8, { wave: saw, env: perc(0.003, 0.35), cutoff: 1400, damp: 2 }], // pizzicato
-  harp: [4, 1.0, { wave: triangle, env: perc(0.002, 0.5) }],
   guitar: [3, 0.9, { wave: saw, env: perc(0.002, 0.45), cutoff: 3200, damp: 1.5 }],
   flute: [5, HELD, { partials: [[1, 1, Infinity], [2, 0.12, Infinity]], env: held(0.07, 0.1, 0.9), vib: { rate: 5, cents: 18, delay: 0.12 }, breath: 0.25 }],
   clarinet: [4, HELD, { wave: square, env: held(0.04, 0.1, 0.85), cutoff: 1600 }],
@@ -133,30 +92,13 @@ const TONAL = {
   trumpet: [4, HELD, brass(450, 3)],
   trombone: [3, HELD, brass(250, 2.5)],
   tuba: [2, HELD, brass(120, 2)],
-  xylophone: [5, 0.7, { partials: [[1, 1, 0.35], [3.93, 0.35, 0.06], [9.2, 0.12, 0.03]], env: perc(0.001, 1) }],
   piano: [4, 1.1, { partials: [1, 0.5, 0.25, 0.14, 0.07, 0.04].map((a, i) => [i + 1, a, 0.9 / (1 + i)]), env: perc(0.004, 2) }],
   organ: [3, HELD, { partials: [[1, 1, Infinity], [2, 0.7, Infinity], [3, 0.45, Infinity], [5, 0.3, Infinity], [8, 0.18, Infinity]], env: held(0.01, 0.01, 1) }],
   synth: [4, HELD, { wave: saw, env: held(0.02, 0.3, 0.6), cutoff: 1400, detune: [0.994, 1, 1.006] }],
 };
 
-const KITS = {
-  // kick, snare, hat
-  drums: [
-    () => membrane(45, 0.6, { decay: 0.25, bend: 2.5 }),
-    () => mix([hiss(0.35, 0.1, false), 0.8], [membrane(185, 0.35, { decay: 0.06, bend: 0.2 }), 0.5]),
-    () => hiss(0.2, 0.03, true),
-  ],
-  // low drum, fifth, octave
-  timpani: [65.41, 98.0, 130.81].map((f) => () =>
-    membrane(f, 1.4, { decay: 0.5, bend: 0.06, overtones: [[1.5, 0.5], [1.98, 0.35], [2.44, 0.2]], thump: 0.3 }),
-  ),
-  // low bongo, high bongo, slap
-  bongos: [
-    () => membrane(196, 0.35, { decay: 0.12, bend: 0.3, overtones: [[2.3, 0.2]] }),
-    () => membrane(293.66, 0.35, { decay: 0.1, bend: 0.3, overtones: [[2.3, 0.2]] }),
-    () => mix([hiss(0.25, 0.03, true), 0.7], [membrane(420, 0.25, { decay: 0.02, bend: 0.1 }), 0.4]),
-  ],
-};
+// Sound files named differently from their instrument id.
+const FILE_NAMES = { sax: 'saxophone' };
 
 // ---- output ----
 
@@ -196,14 +138,14 @@ const save = (name, samples) => {
 };
 for (const [id, [octave, dur, recipe]] of Object.entries(TONAL)) {
   banks[id] = [];
-  for (let semi = 0; semi <= MAX_SEMITONE; semi += SAMPLE_STEP) banks[id].push(save(`${id}_${semi}`, voice(hz(octave, semi), dur, recipe)));
+  const file = FILE_NAMES[id] ?? id;
+  for (let semi = 0; semi <= MAX_SEMITONE; semi += SAMPLE_STEP) banks[id].push(save(`${file}_${semi}`, voice(hz(octave, semi), dur, recipe)));
 }
-for (const [id, hits] of Object.entries(KITS)) banks[id] = hits.map((make, row) => save(`${id}_${row}`, make()));
 
 writeFileSync(
   GEN_FILE,
   `// Generated by scripts/gen-sounds.mjs. Do not edit; change the script and rerun it.
-// Tonal: SOUNDS[id][i] is the note SAMPLE_STEP * i semitones above C. Drum kits: one sound per row.
+// SOUNDS[id][i] is the note SAMPLE_STEP * i semitones above C.
 export const SAMPLE_STEP = ${SAMPLE_STEP};
 
 export const SOUNDS: Record<string, number[]> = {

@@ -80,12 +80,12 @@ test('switching bars places a note at the end of the second bar', () => {
   assert.equal(e.notes()[0].length, 4, 'the song runs on past bar 2, so the note gets a full beat');
 });
 
-test('a locked editor cannot add notes; reduced drum rows map correctly', () => {
+test('a locked editor cannot add notes; a reduced row count maps correctly', () => {
   const locked = editor(true);
   locked.press('Add C, bar 1, step 1');
   assert.equal(locked.notes().length, 0);
-  const drums = editor(false, 3);
-  drums.press('Add E, bar 1, step 2');
-  assert.equal(drums.notes()[0].row, 2);
-  assert.equal(drums.notes()[0].start, 1);
+  const short = editor(false, 3);
+  short.press('Add E, bar 1, step 2');
+  assert.equal(short.notes()[0].row, 2);
+  assert.equal(short.notes()[0].start, 1);
 });

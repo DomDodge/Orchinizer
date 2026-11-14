@@ -27,7 +27,7 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 | Players | 4–8. Bots fill empty seats up to 4 when the host starts |
 | Seats | Lowest free number from 1. `players[]` is in join order; reusing a seat does not jump ahead in the conductor order. `0` means none |
 | Colors | `SeatColors[seat-1]` (see `constants.go`) |
-| Instruments | Humans pick unique instruments from host-enabled strings, wind, percussion, and keys sections. See `InstrumentGroups` / `INSTRUMENT_GROUPS`. Picks persist between rounds and games. Bots fill unused active instruments |
+| Instruments | Humans pick unique instruments from host-enabled strings, wind, and keys sections. See `InstrumentGroups` / `INSTRUMENT_GROUPS`. Picks persist between rounds and games. Bots fill unused active instruments |
 | Scale | Major pentatonic `[0,2,4,7,9]` semitones above `state.key`. Grid row 0 is the lowest note |
 | Grid | `steps[row][step]`: 5 rows × 8 steps (one bar of eighth notes) |
 | Notes | The note editor's part. Each note is `{id, row, start, length, instrument?}`, with times in steps: 4 per beat (16th notes). Everyone writes on one **shared sheet**, the song: 256 steps (16 bars), played from the top in perform. Up to 16 notes per player, each 1–8 steps long. The song is monophonic: no note may overlap any other player's or your own, on any row. Notes may touch: one can start on the step where the last one ends. `instrument` (if set) must be enabled in this game. Every seat's notes are in `state.notes`, so phones can draw the whole sheet |

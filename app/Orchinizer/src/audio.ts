@@ -1,12 +1,10 @@
 // Phone audio is Preview only (the TV plays the show), so keep it quiet.
 // Each instrument has its own samples (scripts/gen-sounds.mjs), voiced like its TV synth.
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
-import { instrumentInfo, keyRoot, SCALE } from './protocol';
+import { keyRoot, SCALE } from './protocol';
 import { SAMPLE_STEP, SOUNDS } from './sounds.gen';
 
 const PREVIEW_VOLUME = 0.5;
-
-const isKit = (instrument: string) => instrumentInfo(instrument).voice === 'drums';
 
 type Sound = { id: string; source: number; rate: number };
 
@@ -16,10 +14,6 @@ type Sound = { id: string; source: number; rate: number };
  */
 function soundFor(instrument: string, key: string, row: number): Sound | null {
   const bank = SOUNDS[instrument] ?? SOUNDS.piano;
-  if (isKit(instrument)) {
-    const source = bank[row];
-    return source == null ? null : { id: `${instrument}:${row}`, source, rate: 1 };
-  }
   const semitone = keyRoot(key) + SCALE[row];
   const i = Math.min(bank.length - 1, Math.floor(semitone / SAMPLE_STEP));
   return { id: `${instrument}:${semitone}`, source: bank[i], rate: 2 ** ((semitone - i * SAMPLE_STEP) / 12) };
@@ -51,8 +45,7 @@ function ensureAudioMode() {
 /** Create the players for an instrument up front so the first tap isn't late. */
 export function preload(instrument: string, key: string) {
   ensureAudioMode();
-  const rows = isKit(instrument) ? 3 : SCALE.length;
-  for (let r = 0; r < rows; r++) {
+  for (let r = 0; r < SCALE.length; r++) {
     const s = soundFor(instrument, key, r);
     if (s) player(s);
   }
@@ -66,7 +59,6 @@ export function playNoteFor(instrument: string, key: string, row: number, ms: nu
   const s = soundFor(instrument, key, row);
   if (!s) return;
   playNote(instrument, key, row);
-  if (isKit(instrument)) return; // hits ring out on their own
   stops.set(s.id, setTimeout(() => {
     stops.delete(s.id);
     player(s).pause();

@@ -6,13 +6,13 @@
 //     destination  Tone.js node to connect your output to (the engine's master bus).
 //     key          the round's key as a note name, e.g. 'C', 'Bb'.
 //
-//   inst.play(row, time, duration)
-//     row       0-4, the row of one note (0 = lowest). Drum kits (drums, timpani, bongos)
-//               use rows 0-2 only.
+//   inst.play(row, time, duration?)
+//     row       0-4, the row of one note (0 = lowest).
 //     time      exact AudioContext time to sound the note. Always pass it through to
 //               triggerAttack*/start(); never play "now", or it drifts off the beat.
-//     duration  seconds the note is held (a stretched note is longer). Plucked and struck
-//               instruments ring out on their own and ignore it.
+//     duration  seconds the note is held (a stretched note is longer). Omitted for old grid
+//               parts: held instruments then play an 8th note. Plucked instruments ring out
+//               on their own and ignore it.
 //
 //   inst.setVolume(level, time?)
 //     level 0-100 from the conductor. `time` is when the change should be heard
@@ -53,7 +53,7 @@ function held(destination, key, octave, voice, options, effects = []) {
   const chain = [synth, ...effects]
   for (let i = 0; i < chain.length - 1; i++) chain[i].connect(chain[i + 1])
   return instrument(destination, chain[chain.length - 1], chain, (row, time, duration) =>
-    synth.triggerAttackRelease(notes[row], Math.max(duration, 0.08), time),
+    synth.triggerAttackRelease(notes[row], Math.max(duration ?? Tone.Time('8n').toSeconds(), 0.08), time),
   )
 }
 
@@ -93,12 +93,6 @@ const RECIPES = {
   viola: (d, k) => held(d, k, 4, Tone.Synth, bowed(2600, 0.1).options, bowed(2600, 0.1).effects()),
   cello: (d, k) => held(d, k, 3, Tone.Synth, bowed(1800, 0.08).options, bowed(1800, 0.08).effects()),
   contrabass: (d, k) => plucked(d, k, 2, { attackNoise: 0.6, dampening: 1400, resonance: 0.92, volume: 2 }), // pizzicato
-  harp: (d, k) =>
-    held(d, k, 4, Tone.Synth, {
-      oscillator: { type: 'triangle' },
-      envelope: { attack: 0.002, decay: 1.4, sustain: 0, release: 1.2 },
-      volume: -6,
-    }),
   guitar: (d, k) => plucked(d, k, 3, { attackNoise: 1.2, dampening: 3200, resonance: 0.96, volume: 0 }),
 
   // Wind
@@ -123,54 +117,6 @@ const RECIPES = {
   trumpet: (d, k) => held(d, k, 4, Tone.MonoSynth, brass(450, 3).options),
   trombone: (d, k) => held(d, k, 3, Tone.MonoSynth, brass(250, 2.5).options),
   tuba: (d, k) => held(d, k, 2, Tone.MonoSynth, brass(120, 2).options),
-
-  // Percussion
-  drums: (d) => {
-    const out = new Tone.Gain(1)
-    const kick = new Tone.MembraneSynth().connect(out)
-    const snare = new Tone.NoiseSynth({ envelope: { decay: 0.1, sustain: 0 }, volume: -10 }).connect(out)
-    const hat = new Tone.NoiseSynth({ envelope: { decay: 0.03, sustain: 0 }, volume: -20 }).connect(out)
-    const hits = [
-      (t) => kick.triggerAttackRelease('C1', '8n', t),
-      (t) => snare.triggerAttackRelease('16n', t),
-      (t) => hat.triggerAttackRelease('32n', t),
-    ]
-    return instrument(d, out, [out, kick, snare, hat], (row, time) => hits[row]?.(time))
-  },
-  timpani: (d) => {
-    const out = new Tone.Gain(1)
-    const drum = new Tone.PolySynth(Tone.MembraneSynth, {
-      pitchDecay: 0.08,
-      octaves: 1.5,
-      envelope: { attack: 0.002, decay: 1.2, sustain: 0, release: 1 },
-    }).connect(out)
-    const pitches = ['C2', 'G2', 'C3'] // low, fifth, octave
-    return instrument(d, out, [out, drum], (row, time) => pitches[row] && drum.triggerAttackRelease(pitches[row], '2n', time))
-  },
-  bongos: (d) => {
-    const out = new Tone.Gain(1)
-    const drum = new Tone.PolySynth(Tone.MembraneSynth, {
-      pitchDecay: 0.01,
-      octaves: 1.2,
-      envelope: { attack: 0.001, decay: 0.16, sustain: 0, release: 0.1 },
-      volume: -2,
-    }).connect(out)
-    const slap = new Tone.NoiseSynth({ envelope: { attack: 0.001, decay: 0.05, sustain: 0 }, volume: -14 }).connect(out)
-    const hits = [
-      (t) => drum.triggerAttackRelease('G3', '16n', t), // low bongo
-      (t) => drum.triggerAttackRelease('D4', '16n', t), // high bongo
-      (t) => slap.triggerAttackRelease('32n', t),
-    ]
-    return instrument(d, out, [out, drum, slap], (row, time) => hits[row]?.(time))
-  },
-  xylophone: (d, k) =>
-    held(d, k, 5, Tone.FMSynth, {
-      harmonicity: 4,
-      modulationIndex: 3,
-      envelope: { attack: 0.001, decay: 0.45, sustain: 0, release: 0.4 },
-      modulationEnvelope: { attack: 0.001, decay: 0.08, sustain: 0, release: 0.1 },
-      volume: 2,
-    }),
 
   // Keys
   piano: (d, k) =>

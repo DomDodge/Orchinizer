@@ -38,7 +38,7 @@ type Props = {
   disabled?: boolean;
   /** For an audio preview when a note is placed, moved or stretched. */
   onPlace?: (note: Note) => void;
-  /** How many rows to show, from row 0 up (drums use 3). At most ROWS. */
+  /** How many rows to show, from row 0 up. At most ROWS. */
   rows?: number;
   /** Row names, indexed by row. Defaults to the note names in keyName. */
   rowLabels?: string[];
