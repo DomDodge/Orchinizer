@@ -91,6 +91,7 @@ type Room struct {
 	conductor  int
 	// Last accepted select/volume, for the 10/s limit.
 	lastSelect, lastVolume time.Time
+	aimSeat                int  // conductor's latest select, even when rate-limited
 	flushPending           bool // an evFlush is on its way
 
 	// The game: conductors in order (fixed at start), the round in

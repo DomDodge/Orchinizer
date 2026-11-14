@@ -1,6 +1,7 @@
 package game
 
 import (
+	"encoding/json"
 	"strconv"
 	"time"
 
@@ -166,6 +167,16 @@ func (r *Room) onConductor(c Client, p *player, typ string, raw []byte) {
 		}
 	}
 
+	if typ == protocol.TypeSelect {
+		// Holds are scored from aim, so record every select, even ones the 10/s relay limit drops below.
+		var m protocol.Select
+		if json.Unmarshal(raw, &m) == nil && (m.Seat == 0 || r.players[m.Seat] != nil) { // bad ones get rejected below
+			r.aimSeat = m.Seat
+			if r.phase == protocol.PhasePerform && r.scorer != nil {
+				r.scorer.aimAt(m.Seat, time.Now().UnixMilli())
+			}
+		}
+	}
 	if !r.underRate(typ) {
 		return // over 10/s: drop quietly, the next one will carry the latest value
 	}

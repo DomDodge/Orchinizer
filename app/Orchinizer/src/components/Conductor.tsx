@@ -6,7 +6,7 @@ import { clearCalibration, getCalibration } from '../calibration';
 import { send, serverNow, useSecondsLeft } from '../net';
 import { motionSupported, onSample } from '../pointer';
 import { instrumentInfo, type Player, type State } from '../protocol';
-import { nextTarget } from '../scoring';
+import { nextFlick } from '../scoring';
 import { BeatRing } from './Pulse';
 import { ScorePanel } from './ScorePanel';
 import { BG, Btn, FG, H1, P, Screen, Timer } from './ui';
@@ -32,10 +32,17 @@ export function Perform({ state }: { state: State }) {
 
   const cue = (seat: number) => {
     if (!seat) return;
-    const target = nextTarget(scoring.current, serverNow());
+    const target = nextFlick(scoring.current, serverNow());
     const action = target?.seat === seat ? target.action : live.current[seat] != null ? 'out' : 'in';
     send({ type: 'cue', id: cueId(), seat, action });
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+  };
+
+  // In button mode, pressing and holding a player's button is aiming at them (for hold prompts).
+  const aim = (seat: number) => {
+    sel.current = seat;
+    setSelected(seat);
+    send({ type: 'select', seat });
   };
 
   useEffect(() => {
@@ -70,13 +77,15 @@ export function Perform({ state }: { state: State }) {
         <Timer left={left} />
       </Pressable>
 
-      <ScorePanel state={state} />
+      <ScorePanel state={state} aimSeat={selected} />
 
       {buttons ? (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.buttons}>
           {players.map((x) => (
             <Pressable
               key={x.seat}
+              onPressIn={() => aim(x.seat)}
+              onPressOut={() => aim(0)}
               onPress={() => cue(x.seat)}
               style={[styles.cueBtn, { borderColor: x.color, backgroundColor: isLive(x) ? x.color : '#15151F' }]}
             >

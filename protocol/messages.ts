@@ -84,13 +84,16 @@ export interface ScoreSummary {
   total: number;
 }
 
-export interface CueTarget {
+interface CueTargetBase {
   id: number;
   seat: number;
-  action: CueAction;
   at: number; // server Unix milliseconds; score the gesture, before TV quantization
   result: 'pending' | 'perfect' | 'good' | 'miss';
 }
+/** A prompt on the conductor's chart. `kind` is the gesture it wants (see README "Note types"). */
+export type CueTarget =
+  | (CueTargetBase & { kind: 'flick'; action: CueAction })
+  | (CueTargetBase & { kind: 'hold'; end: number }); // keep pointing at seat from at to end
 
 export interface RoundScoring {
   summary: ScoreSummary;
@@ -100,6 +103,8 @@ export interface RoundScoring {
 }
 
 export const SCORE_HIT_WINDOW_MS = 300;
+export const HOLD_PERFECT_SHARE = 0.9;
+export const HOLD_GOOD_SHARE = 0.6;
 
 /** Full game state, broadcast on every change. */
 export interface State extends Base {

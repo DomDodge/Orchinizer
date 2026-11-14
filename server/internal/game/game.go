@@ -234,6 +234,7 @@ func (r *Room) startCompose(conductor int) {
 	}
 	r.pending = map[string]protocol.Cue{}
 	r.lastSelect, r.lastVolume = time.Time{}, time.Time{}
+	r.aimSeat = 0 // a new conductor hasn't pointed at anyone yet
 
 	r.setDeadline(r.timings.Compose)
 	r.log.Info("compose", "round", r.round, "conductor", conductor, "key", r.key, "tempo", r.tempo)
@@ -265,6 +266,7 @@ func (r *Room) startPerform() {
 	}
 	r.setDeadline(r.timings.Perform)
 	r.scorer = newRoundScorer(r.currentParts(), r.tempo, time.Now(), r.deadline)
+	r.scorer.aimAt(r.aimSeat, time.Now().UnixMilli()) // already pointing from calibration
 	r.log.Info("perform", "round", r.round)
 	r.broadcastState()
 }

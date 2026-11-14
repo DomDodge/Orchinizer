@@ -6,7 +6,8 @@ import { instrumentInfo, type State } from '../protocol';
 import { nextTarget, scoreMultiplier } from '../scoring';
 import { DIM, FG, P } from './ui';
 
-export function ScorePanel({ state }: { state: State }) {
+/** aimSeat: who the conductor is pointing at now, so a hold can show when they drift off. */
+export function ScorePanel({ state, aimSeat = 0 }: { state: State; aimSeat?: number }) {
   const [now, setNow] = useState(() => serverNow());
   useEffect(() => {
     const timer = setInterval(() => setNow(serverNow()), 50);
@@ -20,7 +21,11 @@ export function ScorePanel({ state }: { state: State }) {
   const inWindow = !!target && remaining <= 0 && remaining >= -SCORE_HIT_WINDOW_MS;
   const color = player?.color ?? FG;
   const feedback = scoring.last && now - scoring.last.at < 1200 ? scoring.last : null;
-  const progress = Math.max(0, Math.min(1, 1 - remaining / 2200));
+  const holding = target?.kind === 'hold' && remaining <= 0;
+  const onTarget = !holding || aimSeat === target.seat;
+  // Approach bar before a prompt; during a hold, how much of the hold has passed.
+  const progress = holding ? Math.min(1, (now - target.at) / (target.end - target.at)) : Math.max(0, Math.min(1, 1 - remaining / 2200));
+  const what = target?.kind === 'hold' ? 'HOLD' : `CUE ${target?.action.toUpperCase()}`;
   const resultColor = feedback?.result === 'perfect' ? '#69F0AE' : feedback?.result === 'good' ? '#FFB300' : '#FF5252';
 
   return (
@@ -32,9 +37,14 @@ export function ScorePanel({ state }: { state: State }) {
       </View>
       {target && player ? (
         <View style={[styles.prompt, { borderColor: color }]}>
-          <Text style={[styles.when, { color }]}>{inWindow ? 'NOW' : `IN ${(Math.max(0, remaining) / 1000).toFixed(1)}s`} · CUE {target.action.toUpperCase()}</Text>
-          <Text style={styles.who}>{player.name} · {instrumentInfo(player.instrument).label}</Text>
-          <View style={styles.track}><View style={[styles.progress, { backgroundColor: color, width: `${progress * 100}%` }]} /></View>
+          <Text style={[styles.when, { color }]}>
+            {holding ? 'HOLD · keep pointing' : `${inWindow ? 'NOW' : `IN ${(Math.max(0, remaining) / 1000).toFixed(1)}s`} · ${what}`}
+          </Text>
+          <Text style={styles.who}>
+            {player.name} · {instrumentInfo(player.instrument).label}
+            {!onTarget ? ' · point back!' : ''}
+          </Text>
+          <View style={styles.track}><View style={[styles.progress, { backgroundColor: onTarget ? color : '#FF5252', width: `${progress * 100}%` }]} /></View>
         </View>
       ) : <P color={FG}>All prompts finished</P>}
       <Text accessibilityLiveRegion="polite" style={[styles.feedback, { color: feedback ? resultColor : DIM }]}>

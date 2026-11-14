@@ -152,13 +152,23 @@ type ScoreSummary struct {
 	Total    int `json:"total"`
 }
 
+// CueTarget is one prompt on the conductor's chart. Kind says which gesture it wants:
+//   - flick: point at Seat and flick (cue Action) at At.
+//   - hold:  keep pointing at Seat from At until End. Scored by the share of that time aimed at Seat.
 type CueTarget struct {
 	ID     int    `json:"id"`
+	Kind   string `json:"kind"`
 	Seat   int    `json:"seat"`
-	Action string `json:"action"`
+	Action string `json:"action,omitempty"` // flick only
 	At     int64  `json:"at"`
+	End    int64  `json:"end,omitempty"` // hold only
 	Result string `json:"result"`
 }
+
+const (
+	TargetFlick = "flick"
+	TargetHold  = "hold"
+)
 
 type ScoreJudgment struct {
 	TargetID int    `json:"targetId"`
