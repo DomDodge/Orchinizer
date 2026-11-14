@@ -143,7 +143,7 @@ export function Calibrate({ state }: { state: State }) {
         {motion === 'unavailable' && (
           <View style={styles.target}>
             <H1>Use button controls</H1>
-            <P>{motionSupported ? 'Motion is unavailable or permission was not granted.' : 'Pointing is available in the native phone app. This browser uses buttons.'}</P>
+            <P>{motionSupported ? 'This phone isn’t giving motion readings.' : 'Pointing is available in the native phone app. This browser uses buttons.'}</P>
             <P>You can still bring every part in and out from the performance screen.</P>
           </View>
         )}

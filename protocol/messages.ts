@@ -62,6 +62,7 @@ export interface PlayerState {
   bot: boolean;
   noteCount: number;
   playing: boolean;
+  done: boolean; // tapped Done in compose; bots always are
 }
 
 export interface PerformanceSummary {
@@ -230,7 +231,8 @@ export type ClientMessage =
   | Categories
   | Pick
   | Leave
-  | Kick;
+  | Kick
+  | Done;
 
 /** GET https://<host>/config (plain HTTP JSON): what the TV's QR code should open. */
 export interface ServerConfig {
@@ -245,6 +247,8 @@ export interface Pick extends Base { type: "pick"; instrument: string | null }
 export interface Leave extends Base { type: "leave" }
 export interface Kick extends Base { type: "kick"; seat: number }
 export interface Kicked extends Base { type: "kicked" }
+/** Compose: mark my part finished (or not). When every composing player is done, compose ends early. */
+export interface Done extends Base { type: "done"; done: boolean }
 export const INSTRUMENT_GROUPS: Record<Category, string[]> = {
   strings: ["contrabass", "cello", "viola", "violin", "harp", "guitar"],
   wind: ["flute", "clarinet", "sax", "trumpet", "trombone", "tuba"],

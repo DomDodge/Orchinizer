@@ -10,8 +10,13 @@ import { DIM, FG, P } from './ui';
 export function ScorePanel({ state, aimSeat = 0 }: { state: State; aimSeat?: number }) {
   const [now, setNow] = useState(() => serverNow());
   useEffect(() => {
-    const timer = setInterval(() => setNow(serverNow()), 50);
-    return () => clearInterval(timer);
+    let raf = 0;
+    const frame = () => {
+      setNow(serverNow());
+      raf = requestAnimationFrame(frame);
+    };
+    frame();
+    return () => cancelAnimationFrame(raf);
   }, []);
   const scoring = state.scoring;
   if (!scoring) return null;
@@ -35,6 +40,7 @@ export function ScorePanel({ state, aimSeat = 0 }: { state: State; aimSeat?: num
         <View><Text style={styles.value}>{scoring.combo}</Text><Text style={styles.label}>COMBO</Text></View>
         <View><Text style={[styles.value, { color: '#FFB300' }]}>×{scoreMultiplier(scoring.combo)}</Text><Text style={styles.label}>MULTIPLIER</Text></View>
       </View>
+      <Lanes state={state} now={now} aimSeat={aimSeat} />
       {target && player ? (
         <View style={[styles.prompt, { borderColor: color }]}>
           <Text style={[styles.when, { color }]}>
@@ -54,7 +60,48 @@ export function ScorePanel({ state, aimSeat = 0 }: { state: State; aimSeat?: num
   );
 }
 
+const LOOK_MS = 3000; // how far ahead the lanes show prompts
+const LANES_H = 170;
+const HIT_Y = LANES_H - 34; // the line a prompt crosses at its time; seat badges sit below it
+
+/** Prompts falling toward each player's lane, like the TV's, so the conductor can read ahead. */
+function Lanes({ state, now, aimSeat }: { state: State; now: number; aimSeat: number }) {
+  const band = state.players.filter((p) => p.instrument && p.seat !== state.conductor);
+  const y = (t: number) => HIT_Y - ((t - now) / LOOK_MS) * HIT_Y;
+  return (
+    <View style={styles.lanes}>
+      {band.map((p) => (
+        <View key={p.seat} style={[styles.lane, p.seat === aimSeat && { backgroundColor: p.color + '33' }]}>
+          {state.scoring!.targets.map((t) => {
+            if (t.seat !== p.seat || t.result === 'perfect' || t.result === 'good') return null;
+            const bottom = y(t.at);
+            const top = t.kind === 'hold' ? y(t.end) : bottom;
+            if (bottom < -14 || top > HIT_Y + 20) return null; // not in view yet, or long past
+            const missed = t.result === 'miss';
+            return (
+              <View
+                key={t.id}
+                style={[styles.chip, { top: top - 12, height: bottom - top + 24, backgroundColor: missed ? '#33334A' : p.color }]}
+              >
+                <Text style={styles.chipText}>{missed ? 'MISS' : t.kind === 'hold' ? 'HOLD' : t.action.toUpperCase()}</Text>
+              </View>
+            );
+          })}
+          <View style={[styles.hitLine, { backgroundColor: p.color }]} />
+          <Text style={[styles.laneSeat, { color: p.color }]}>{p.seat}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  lanes: { flexDirection: 'row', gap: 4, height: LANES_H },
+  lane: { flex: 1, backgroundColor: '#15151F', borderRadius: 10, overflow: 'hidden' },
+  chip: { position: 'absolute', left: 4, right: 4, borderRadius: 12, justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 4 },
+  chipText: { color: '#0B0B12', fontSize: 11, fontWeight: '900' },
+  hitLine: { position: 'absolute', left: 0, right: 0, top: HIT_Y, height: 3 },
+  laneSeat: { position: 'absolute', left: 0, right: 0, bottom: 4, textAlign: 'center', fontSize: 18, fontWeight: '900' },
   panel: { gap: 8 },
   metrics: { flexDirection: 'row', justifyContent: 'space-around' },
   value: { color: FG, fontSize: 28, fontWeight: '900', textAlign: 'center', fontVariant: ['tabular-nums'] },

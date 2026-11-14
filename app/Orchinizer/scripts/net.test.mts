@@ -30,6 +30,7 @@ function client(serverUrl = 'ws://localhost:8080/ws') {
     setTimeout: (f: () => void) => retries.push(f),
     require: (name: string) => {
       if (name === 'react') return { useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot() };
+      if (name === 'react-native') return { AppState: { addEventListener: () => {} } };
       throw new Error(`Unexpected import: ${name}`);
     },
   });

@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import { AppState } from 'react-native';
 import type { ClientMsg, ServerMsg, State } from './protocol';
 
 // Set this to the game server's WebSocket endpoint when starting Expo.
@@ -99,6 +100,21 @@ function open() {
     if (join) setTimeout(() => join && !ws && open(), 1000);
   };
 }
+
+// A locked phone's socket is often dead without a close event yet: reconnect as soon as the app is back.
+// Only after 'background': 'inactive' (Control Center, notifications) keeps the socket alive.
+let away = false;
+AppState.addEventListener('change', (st) => {
+  if (st === 'background') away = true;
+  if (st !== 'active' || !away) return;
+  away = false;
+  if (!join?.token) return;
+  // Don't close the old socket: the server would count that as leaving (ending compose early).
+  // The token rejoin replaces it on the server, and its handlers go quiet once ws moves on.
+  ws = null;
+  set({ connected: false }); // sends are dropped until the new socket opens
+  open();
+});
 
 export function leave() {
   send({ type: 'leave' });

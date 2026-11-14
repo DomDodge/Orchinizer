@@ -34,14 +34,12 @@ test('browser and unavailable sensors return false without requesting permission
   assert.equal(native.control.requests, 0);
   assert.equal(native.control.listeners, 0);
 });
-test('denied permission can be retried without adding duplicate sensor subscriptions', async () => {
+test('pointing starts even when the iOS Motion & Fitness permission is denied, and subscribes once', async () => {
+  // expo-sensors' iOS "motion permission" is the step counter's (CMPedometer); device motion streams without it.
   const { api, control } = sensor(); control.granted = false;
-  assert.equal(await api.startMotion(), false);
-  assert.equal(control.listeners, 0);
-  control.granted = true;
   const results = await Promise.all([api.startMotion(), api.startMotion()]);
   assert.deepEqual(results, [true, true]);
-  assert.equal(control.requests, 2);
+  assert.equal(control.requests, 0); // never asks for, or waits on, the pedometer permission
   assert.equal(control.listeners, 1);
   assert.equal(await api.startMotion(), true);
   assert.equal(control.listeners, 1);

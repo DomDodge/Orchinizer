@@ -31,11 +31,12 @@ test('phone lobby → token reconnect → two conductor rounds → scores → re
     function phone(name: string, room = '') {
       const changes = new EventEmitter(), sockets: WebSocket[] = [];
       class Socket extends WebSocket { constructor(address: string) { super(address); sockets.push(this); } }
-      const api: any = {}; let subscribed = false;
+      const api: any = {}; let subscribed = false, wake = () => {};
       runInNewContext(source, {
         exports: api, WebSocket: Socket, process: { env: { EXPO_PUBLIC_SERVER_URL: url } },
         setTimeout, clearTimeout, setInterval, clearInterval,
         require: (name: string) => {
+          if (name === 'react-native') return { AppState: { addEventListener: (_: string, f: (s: string) => void) => { wake = () => { f('background'); f('active'); }; } } };
           assert.equal(name, 'react');
           return { useSyncExternalStore: (subscribe: any, getSnapshot: any) => {
             if (!subscribed) { subscribed = true; subscribe(() => changes.emit('change')); }
@@ -50,7 +51,7 @@ test('phone lobby → token reconnect → two conductor rounds → scores → re
         changes.on('change', check); check();
       });
       api.useNet(); api.connect(name, room);
-      const p = { api, wait, sockets }; phones.push(p); return p;
+      const p = { api, wait, sockets, wake: () => wake() }; phones.push(p); return p;
     }
     const host = phone('Host');
     const initial = await host.wait(s => s.state?.players.length === 1), room = initial.state.room;
@@ -77,12 +78,19 @@ test('phone lobby → token reconnect → two conductor rounds → scores → re
     const next = () => tv!.send(JSON.stringify({ type: 'host_action', action: 'next' }));
     host.api.send({ type: 'host_action', action: 'start' });
     await host.wait(s => s.state.phase === 'compose'); await guest.wait(s => s.state.phase === 'compose');
-    const steps = Array.from({ length: 5 }, () => Array(8).fill(false)); steps[1][2] = true;
-    guest.api.send({ type: 'pattern', steps }); const guestSeat = guest.api.useNet().seat;
-    await host.wait(s => s.state.patterns[guestSeat][1][2]);
+    // Compose takes note-editor parts (grids are rejected during compose).
+    guest.api.send({ type: 'pattern', notes: [{ id: 'n1', row: 1, start: 2, length: 1 }] }); const guestSeat = guest.api.useNet().seat;
+    await host.wait(s => s.state.notes?.[guestSeat]?.[0]?.start === 2);
     guest.sockets[0].close(); await guest.wait(s => !s.connected);
-    assert.equal((await guest.wait(s => s.connected && s.state.patterns[guestSeat][1][2])).seat, guestSeat);
-    next(); await host.wait(s => s.state.phase === 'calibrate');
+    assert.equal((await guest.wait(s => s.connected && s.state.notes?.[guestSeat]?.[0]?.start === 2)).seat, guestSeat);
+    // Unlocking the phone swaps in a fresh socket and rejoins the same seat.
+    const before = guest.sockets.length; guest.wake();
+    assert.equal(guest.sockets.length, before + 1);
+    const fresh = guest.sockets.at(-1)!;
+    const welcome = await new Promise<any>(r => fresh.addEventListener('message', e => { const m = JSON.parse(String(e.data)); if (m.type === 'welcome') r(m); }));
+    assert.equal(welcome.seat, guestSeat);
+    // The guest is the only human composing (the host conducts), so their Done ends compose early.
+    guest.api.send({ type: 'done', done: true }); await host.wait(s => s.state.phase === 'calibrate');
     host.api.send({ type: 'calibrated', angles: {} }); await host.wait(s => s.state.phase === 'perform');
     const target = host.api.useNet().state.scoring.targets[0];
     assert.ok(target && target.result === 'pending');

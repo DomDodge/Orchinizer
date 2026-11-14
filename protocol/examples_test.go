@@ -14,7 +14,7 @@ import (
 func TestExamples(t *testing.T) {
 	targets := map[string]func() any{
 		TypeCategories: func() any { return &Categories{} }, TypePick: func() any { return &Pick{} },
-		TypeLeave: func() any { return &Leave{} }, TypeKick: func() any { return &Kick{} }, TypeKicked: func() any { return &Kicked{} },
+		TypeLeave: func() any { return &Leave{} }, TypeKick: func() any { return &Kick{} }, TypeKicked: func() any { return &Kicked{} }, TypeDone: func() any { return &Done{} },
 		TypeJoin: func() any { return &Join{} }, TypeWelcome: func() any { return &Welcome{} },
 		TypeError: func() any { return &Error{} }, TypeState: func() any { return &State{} },
 		TypePattern: func() any { return &Pattern{} }, TypePatterns: func() any { return &Patterns{} },

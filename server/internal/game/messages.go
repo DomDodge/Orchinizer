@@ -22,6 +22,8 @@ func (r *Room) onMessage(c Client, typ string, raw []byte) {
 		r.lobbyMessage(c, p, typ, raw)
 	case protocol.TypePattern:
 		r.onPattern(c, p, raw)
+	case protocol.TypeDone:
+		r.onDone(c, p, raw)
 
 	case protocol.TypeSelect, protocol.TypeCue, protocol.TypeVolume, protocol.TypeCalibrated:
 		r.onConductor(c, p, typ, raw)
@@ -116,6 +118,41 @@ func (r *Room) onPattern(c Client, p *player, raw []byte) {
 	p.notes = m.Notes
 	p.noteCount = countNotes(m.Steps) + len(m.Notes)
 	r.patternChanged(p)
+}
+
+// onDone marks a part finished (or not). Compose ends early once everyone composing is done.
+func (r *Room) onDone(c Client, p *player, raw []byte) {
+	if p == nil || r.phase != protocol.PhaseCompose || p.seat == r.conductor {
+		r.reject(c, "done is only for players composing a part")
+		return
+	}
+	var m protocol.Done
+	if !r.decode(c, raw, &m) {
+		return
+	}
+	p.done = m.Done
+	if r.composeDone() {
+		r.log.Info("everyone done composing", "round", r.round)
+		r.advance()
+		return
+	}
+	r.broadcastState()
+}
+
+// composeDone is true when every connected human composing this round has tapped Done, and at
+// least one has. Bots and disconnected seats don't hold the round up.
+func (r *Room) composeDone() bool {
+	someone := false
+	for _, p := range r.seatOrder() {
+		if p.seat == r.conductor || p.bot || p.client == nil || p.instrument == "" {
+			continue
+		}
+		if !p.done {
+			return false
+		}
+		someone = true
+	}
+	return someone
 }
 
 // patternChanged broadcasts a new part, at most once per minStreamInterval

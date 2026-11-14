@@ -15,6 +15,7 @@ const (
 	TypeError        = "error"         // server -> one client
 	TypeState        = "state"         // server -> all
 	TypePattern      = "pattern"       // player -> server
+	TypeDone         = "done"          // player -> server (compose)
 	TypePatterns     = "patterns"      // server -> tv
 	TypeCalibrated   = "calibrated"    // conductor -> server -> tv
 	TypeSelect       = "select"        // conductor -> server -> tv
@@ -126,6 +127,7 @@ type PlayerState struct {
 	Bot        bool   `json:"bot"`
 	NoteCount  int    `json:"noteCount"` // for the TV's compose tiles
 	Playing    bool   `json:"playing"`   // part is sounding (per the TV's cue_scheduled)
+	Done       bool   `json:"done"`      // tapped Done in compose; bots always are
 }
 
 // PerformanceSummary is one finished round and its conductor's score.
@@ -319,3 +321,10 @@ type Kick struct {
 	Seat int `json:"seat"`
 }
 type Kicked struct{ Envelope }
+
+// Done marks the sender's part finished (or not) during compose. When every
+// composing player is done, compose ends early.
+type Done struct {
+	Envelope
+	Done bool `json:"done"`
+}

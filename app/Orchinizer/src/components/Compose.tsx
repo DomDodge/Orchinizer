@@ -18,6 +18,8 @@ export function Compose({ state, me }: { state: State; me: Player }) {
   const [step, setStep] = useState(-1);
   const [rejected, setRejected] = useState<string | null>(null);
   const left = useSecondsLeft(state.deadline);
+  const band = state.players.filter((p) => p.instrument && p.seat !== state.conductor);
+  const doneCount = band.filter((p) => p.done).length;
   const stepMs = 60000 / state.tempo / STEPS_PER_BEAT;
 
   // The shared sheet: everyone else's notes, which mine have to fit around.
@@ -88,7 +90,7 @@ export function Compose({ state, me }: { state: State; me: Player }) {
         onChange={onChange}
         color={me.color}
         keyName={state.key}
-        disabled={left === 0}
+        disabled={left === 0 || me.done}
         onPlace={(n) => playNoteFor(inst, state.key, n.row, n.length * stepMs)}
         rows={drums ? DRUM_ROWS.length : undefined}
         rowLabels={drums ? DRUM_ROWS : undefined}
@@ -97,8 +99,19 @@ export function Compose({ state, me }: { state: State; me: Player }) {
       />
       {rejected && <P color="#FF5252">{rejected}</P>}
       <Btn label={playing ? '■ Stop preview' : '▶ Preview'} color={playing ? '#444' : '#6C63FF'} onPress={() => setPlaying(!playing)} />
-      <P color={left === 0 ? FG : undefined}>
-        {left === 0 ? "Time's up! Your part is locked in." : 'Everyone writes one 16-bar song: notes can’t overlap anyone’s. Your notes play when the conductor cues you in; an empty part gets filled in.'}
+      {left > 0 && (
+        <Btn
+          label={me.done ? `Done ✓ · tap to keep editing (${doneCount}/${band.length})` : `✓ I'm done (${doneCount}/${band.length} done)`}
+          color={me.done ? '#333' : '#2E7D32'}
+          onPress={() => send({ type: 'done', done: !me.done })}
+        />
+      )}
+      <P color={left === 0 || me.done ? FG : undefined}>
+        {left === 0
+          ? "Time's up! Your part is locked in."
+          : me.done
+            ? 'Waiting for the others. The song starts as soon as everyone is done.'
+            : 'Everyone writes one 16-bar song: notes can’t overlap anyone’s. Your notes play when the conductor cues you in; an empty part gets filled in. Tap Done when you’re happy with it.'}
       </P>
     </Screen>
   );
@@ -108,7 +121,7 @@ export function Compose({ state, me }: { state: State; me: Player }) {
 export function ConductorWaiting({ state }: { state: State }) {
   const left = useSecondsLeft(state.deadline);
   const band = state.players.filter((p) => p.instrument && p.seat !== state.conductor);
-  const ready = band.filter((p) => p.noteCount > 0).length;
+  const ready = band.filter((p) => p.done).length;
   const total = band.length;
   return (
     <Screen style={{ justifyContent: 'center' }}>
@@ -116,7 +129,7 @@ export function ConductorWaiting({ state }: { state: State }) {
       <P>The band is writing their parts. Stand where you can point at everyone.</P>
       <Timer left={left} />
       <P color={FG}>
-        {ready}/{total} parts started
+        {ready}/{total} done · starts when everyone is
       </P>
     </Screen>
   );
