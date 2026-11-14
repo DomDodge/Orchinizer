@@ -45,7 +45,7 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 | `join` | any → server | `role` (`tv`/`player`), `name`, `token?`. A TV or named player that sends no `room` creates a room |
 | `welcome` | server → joiner | `role`, `seat`, `color`, `token`; for players also `instrument`, `steps` and `notes?` |
 | `error` | server → one client | `code`, `message`. Codes: `bad_message`, `room_not_found`, `room_full`, `game_in_progress`, `not_allowed`, `bad_pattern` |
-| `state` | server → all | full state: `phase`, `round`, `totalRounds`, `host`, `conductor`, `tvConnected`, `categories`, `deadline`, `serverTime`, `key`, `scale`, `tempo`, `instruments`, `players[]`, `patterns`, `live`, `performances`, `winner` |
+| `state` | server → all | full state: `phase`, `round`, `totalRounds`, `host`, `conductor`, `tvConnected`, `categories`, `deadline`, `serverTime`, `key`, `scale`, `tempo`, `instruments`, `players[]`, `patterns`, `live`, `performances`, `winner`, `scoring?` |
 | `categories` | host phone → server | `categories: string[]`; lobby only, at least one section; clears disabled picks |
 | `pick` | player → server | `instrument: string \| null`; lobby only, enabled and unique; `null` unpicks |
 | `leave` | player → server | lobby only; removes the seat and frees the pick; host passes to the next human in join order |
@@ -81,6 +81,18 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 - **Perform:** the conductor may send `select`, `cue` and `volume`. The TV's `cue_scheduled` messages make up the replay log.
 - **A conductor who is disconnected when their round starts is skipped.**
 - **Vote:** the TV gets `performances` (everything needed for replays). You can't vote for a round you conducted. You can change your vote; the last one counts. The vote ends early once everyone eligible has voted. `state.performances` holds the live counts. The vote lasts at least one replay clip per performance plus 5 s (10 s clips by default), and everyone voting early pulls the deadline in to the end of the replays instead of cutting them off.
-- **Results:** `state.winner` is the winning round, and a tie goes to the earlier round. The game stays here until `next` or `restart`, which go back to the lobby with the same players.
+- **Results:** `state.winner` is the round with the most points. Audience votes break tied scores, then the earlier round wins. The game stays here until `next` or `restart`, which go back to the lobby with the same players.
 - **Host actions:** `next` ends the current phase now. `skip` jumps to the vote, keeping the performance in progress (with no performances it goes back to the lobby). `restart` goes back to the lobby from anywhere.
 - **Stale conductor messages:** `select` and `volume` from a non-conductor, or in the wrong phase, are dropped silently, because they stream and some always arrive just after a phase change. `cue` and `calibrated` get an `error`.
+
+## Conductor scoring (additive fields)
+
+During perform, `state.scoring` contains `summary`, `combo`, `targets`, and optional `last` judgment. Targets have `{id, kind, seat, action?, at, end?, result}`; `at` and `end` are Unix milliseconds on the same server clock as `serverTime`. `kind` is the gesture the prompt wants (see *Note types* below). Show the next pending target and send the existing `cue` when the conductor points and flicks/taps. Cue messages and TV audio scheduling stay unchanged; older TV clients can ignore the new state fields.
+
+The first target is four beats after perform starts. Later targets land on bar boundaries spread across the performance; every round gets the same number of prompts regardless of tempo (15 prompts for the default 45 seconds). Seats rotate in join order and each seat alternates `in`/`out`. A correct seat and action within ±120 ms earns Perfect (100 base points); within ±300 ms earns Good (50). Hits 5–9 earn ×2, 10–14 earn ×3, and 15 onward earn ×4. Wrong seat/action or an expired target is a Miss and resets the combo. Early extra cues reset the combo without consuming a future target. Each target resolves once, repeated cue IDs are ignored for the whole round, and all-out cannot score multiple hits.
+
+**Note types** (`kind`):
+- `flick`: point at `seat` and flick (or tap) with `action` at `at`. Judged on cue arrival, as above.
+- `hold`: keep pointing at `seat` from `at` until `end` (3 beats). No cue is sent. The server scores it from the conductor's `select` stream: aimed at the seat for ≥ 90% of the hold is Perfect, ≥ 60% Good, otherwise Miss. It's judged once `end` passes, and it counts toward the combo like any hit. Every 4th prompt is a hold when it fits before the next prompt. Every `select` is recorded for scoring, including ones the 10/s relay limit drops. **TV:** draw holds as a bar from `at` to `end` (flicks as a dot). Clients that don't know `kind` yet can draw everything as a dot.
+
+The server judges cue arrival before TV beat quantization; it never trusts client scores or timestamps. Network latency can affect the grade. Misses expire automatically even if the conductor sends nothing. Skipping/ending a performance counts all its remaining targets as missed. Reconnects preserve the round, while each new conductor and lobby restart reset live scoring. `score` on performance summaries and replay records contains `{points, maxCombo, perfect, good, misses, total}`. Votes remain available for score tie-breaks.

@@ -92,6 +92,8 @@ export function NoteEditor({ notes, onChange, color, keyName, disabled = false, 
                 {Array.from({ length: BAR_STEPS }, (_, s) => (
                   <Pressable
                     key={s}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add ${rowLabels?.[rows - 1 - i] ?? noteName(keyName, rows - 1 - i)}, bar ${bar + 1}, step ${s + 1}`}
                     disabled={disabled}
                     onPress={() => addNote(rows - 1 - i, offset + s)}
                     style={[styles.step, s % STEPS_PER_BEAT === 0 && styles.beat]}

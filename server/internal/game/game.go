@@ -197,6 +197,7 @@ func (r *Room) nextRound() {
 }
 
 func (r *Room) startCompose(conductor int) {
+	r.scorer = nil
 	r.phase = protocol.PhaseCompose
 	r.conductor = conductor
 	r.locked = false
@@ -233,6 +234,7 @@ func (r *Room) startCompose(conductor int) {
 	}
 	r.pending = map[string]protocol.Cue{}
 	r.lastSelect, r.lastVolume = time.Time{}, time.Time{}
+	r.aimSeat = 0 // a new conductor hasn't pointed at anyone yet
 
 	r.setDeadline(r.timings.Compose)
 	r.log.Info("compose", "round", r.round, "conductor", conductor, "key", r.key, "tempo", r.tempo)
@@ -263,6 +265,8 @@ func (r *Room) startPerform() {
 		p.playing = false
 	}
 	r.setDeadline(r.timings.Perform)
+	r.scorer = newRoundScorer(r.currentParts(), r.tempo, time.Now(), r.deadline)
+	r.scorer.aimAt(r.aimSeat, time.Now().UnixMilli()) // already pointing from calibration
 	r.log.Info("perform", "round", r.round)
 	r.broadcastState()
 }
@@ -273,11 +277,17 @@ func (r *Room) finishPerformance() {
 	if p := r.players[r.conductor]; p != nil {
 		name = p.name
 	}
+	var score *protocol.ScoreSummary
+	if r.scorer != nil {
+		summary := r.scorer.finish()
+		score = &summary
+	}
 	r.performances = append(r.performances, protocol.Performance{
 		Round: r.round, ConductorSeat: r.conductor, ConductorName: name,
 		Key: r.key, Tempo: r.tempo,
 		Parts: r.currentParts(),
 		Cues:  append([]protocol.LoggedCue{}, r.cueLog...),
+		Score: score,
 	})
 	r.cueLog = nil
 	for _, p := range r.players {
@@ -362,18 +372,23 @@ func (r *Room) startResults() {
 	r.stopTimer()
 	r.phase = protocol.PhaseResults
 	r.winner = 0
-	best := -1
+	bestPoints, bestVotes := -1, -1
 	for _, s := range r.summaries() { // in round order, so ties go to the earlier round
-		if s.Votes > best {
-			best, r.winner = s.Votes, s.Round
+		points := 0
+		if s.Score != nil {
+			points = s.Score.Points
+		}
+		if points > bestPoints || (points == bestPoints && s.Votes > bestVotes) {
+			bestPoints, bestVotes, r.winner = points, s.Votes, s.Round
 		}
 	}
-	r.log.Info("results", "winner", r.winner, "votes", best)
+	r.log.Info("results", "winner", r.winner, "points", bestPoints, "votes", bestVotes)
 	r.broadcastState()
 }
 
 // toLobby resets the game, keeping the human players.
 func (r *Room) toLobby() {
+	r.scorer = nil
 	r.stopTimer()
 	for seat, p := range r.players {
 		if p.bot {
@@ -409,6 +424,7 @@ func (r *Room) summaries() []protocol.PerformanceSummary {
 		out = append(out, protocol.PerformanceSummary{
 			Round: perf.Round, ConductorSeat: perf.ConductorSeat,
 			ConductorName: perf.ConductorName, Key: perf.Key, Tempo: perf.Tempo, Votes: votes,
+			Score: perf.Score,
 		})
 	}
 	return out

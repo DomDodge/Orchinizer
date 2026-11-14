@@ -72,7 +72,39 @@ export interface PerformanceSummary {
   key: string;
   tempo: number;
   votes: number;
+  score?: ScoreSummary;
 }
+
+export interface ScoreSummary {
+  points: number;
+  maxCombo: number;
+  perfect: number;
+  good: number;
+  misses: number;
+  total: number;
+}
+
+interface CueTargetBase {
+  id: number;
+  seat: number;
+  at: number; // server Unix milliseconds; score the gesture, before TV quantization
+  result: 'pending' | 'perfect' | 'good' | 'miss';
+}
+/** A prompt on the conductor's chart. `kind` is the gesture it wants (see README "Note types"). */
+export type CueTarget =
+  | (CueTargetBase & { kind: 'flick'; action: CueAction })
+  | (CueTargetBase & { kind: 'hold'; end: number }); // keep pointing at seat from at to end
+
+export interface RoundScoring {
+  summary: ScoreSummary;
+  combo: number;
+  targets: CueTarget[];
+  last?: { targetId: number; result: 'perfect' | 'good' | 'miss' | 'early'; points: number; at: number };
+}
+
+export const SCORE_HIT_WINDOW_MS = 300;
+export const HOLD_PERFECT_SHARE = 0.9;
+export const HOLD_GOOD_SHARE = 0.6;
 
 /** Full game state, broadcast on every change. */
 export interface State extends Base {
@@ -101,6 +133,7 @@ export interface State extends Base {
   notes?: Record<string, Note[]>;
   live: Record<string, number>;
   winner: number; // winning round, 0 = none
+  scoring?: RoundScoring;
 }
 
 /** A phone using the note editor sends notes; the grid sequencer sends steps. Each message replaces the whole part. */
@@ -193,6 +226,7 @@ export interface Performance {
   tempo: number;
   parts: Part[];
   cues: LoggedCue[];
+  score?: ScoreSummary;
 }
 
 /** To the TV when the vote starts: everything needed for replays. */
