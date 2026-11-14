@@ -98,7 +98,12 @@ func (r *Room) onPattern(c Client, p *player, raw []byte) {
 	if !r.decode(c, raw, &m) {
 		return
 	}
-	if err := validateNotes(m.Notes, r.instruments()); err != "" {
+	if m.Steps != (protocol.Grid{}) && r.phase == protocol.PhaseCompose {
+		// Everyone writes on the shared sheet; a grid would loop over it.
+		r.sendTo(c, protocol.Error{Envelope: r.env(protocol.TypeError), Code: protocol.ErrBadPattern, Message: "Use the note editor: grid patterns aren't part of the shared song"})
+		return
+	}
+	if err := validateNotes(m.Notes, r.instruments(), r.sheetExcept(p)); err != "" {
 		// The previous part stays.
 		r.sendTo(c, protocol.Error{Envelope: r.env(protocol.TypeError), Code: protocol.ErrBadPattern, Message: err})
 		return

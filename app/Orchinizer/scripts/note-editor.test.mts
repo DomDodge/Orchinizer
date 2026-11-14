@@ -26,7 +26,7 @@ function editor(disabled = false, rows = contract.ROWS) {
         const index = cursor++;
         if (!(index in state)) state[index] = initial;
         return [state[index], (value: any) => { state[index] = value; }];
-      } };
+      }, useEffect: () => {}, useRef: (current: any) => ({ current }) };
       case 'react-native': return { Pressable: 'Pressable', View: 'View', Text: 'Text', StyleSheet: { create: (s: any) => s, hairlineWidth: 1 } };
       case 'react-native-gesture-handler': return {};
       case 'expo-haptics': return { selectionAsync: async () => {}, notificationAsync: async () => {}, NotificationFeedbackType: { Error: 'error' } };
@@ -72,12 +72,12 @@ test('tapping an empty square places and previews the correct note', () => {
 
 test('switching bars places a note at the end of the second bar', () => {
   const e = editor();
-  const button = e.find(e.render(), n => n.type === 'Pressable' && [n.props.children?.props?.children].flat().join('') === 'Bar 2');
+  const button = e.find(e.render(), n => n.type === 'Pressable' && n.props.children?.props?.children === '▶');
   button.props.onPress();
   e.press('Add C, bar 2, step 16');
   assert.equal(e.notes()[0].row, 0);
   assert.equal(e.notes()[0].start, 31);
-  assert.equal(e.notes()[0].length, 1);
+  assert.equal(e.notes()[0].length, 4, 'the song runs on past bar 2, so the note gets a full beat');
 });
 
 test('a locked editor cannot add notes; reduced drum rows map correctly', () => {

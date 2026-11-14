@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { LOOP_STEPS, STEPS_PER_BEAT, type Note } from '../../../../protocol/messages.ts';
 import { playNoteFor, preload } from '../audio';
 import { onPatternRejected, send, useSecondsLeft } from '../net';
 import { DRUM_ROWS, instrumentInfo, type Player, type State } from '../protocol';
-import { NoteEditor } from './NoteEditor';
+import { NoteEditor, type SheetNote } from './NoteEditor';
 import { Btn, FG, H1, P, Screen, Timer } from './ui';
 
 /** Mount with key={round} so each round starts fresh. */
@@ -19,6 +19,12 @@ export function Compose({ state, me }: { state: State; me: Player }) {
   const [rejected, setRejected] = useState<string | null>(null);
   const left = useSecondsLeft(state.deadline);
   const stepMs = 60000 / state.tempo / STEPS_PER_BEAT;
+
+  // The shared sheet: everyone else's notes, which mine have to fit around.
+  const others: SheetNote[] = state.players
+    .filter((p) => p.seat !== me.seat)
+    .flatMap((p) => (state.notes?.[p.seat] ?? []).map((n) => ({ ...n, seat: p.seat, owner: p.name, color: p.color })));
+  const instrumentOf = (seat: number) => state.players.find((p) => p.seat === seat)?.instrument || inst;
 
   useEffect(() => preload(inst, state.key), [inst, state.key]);
 
@@ -38,19 +44,28 @@ export function Compose({ state, me }: { state: State; me: Player }) {
     return () => clearTimeout(t);
   }, [rejected]);
 
-  // Preview: loop the part in 16th-note steps, each note held for its length.
+  // Preview: loop the whole song in 16th-note steps, each note on its writer's instrument for its length.
+  // Read the sheet through a ref so other players' edits don't restart the preview from the top.
+  const sheet = [
+    ...notes.map((n) => ({ n, inst: n.instrument || inst })),
+    ...others.map((n) => ({ n, inst: n.instrument || instrumentOf(n.seat) })),
+  ];
+  const song = useRef(sheet);
+  useEffect(() => {
+    song.current = sheet;
+  });
   useEffect(() => {
     if (!playing) return;
     let s = 0;
     const tick = () => {
       setStep(s);
-      for (const n of notes) if (n.start === s) playNoteFor(inst, state.key, n.row, n.length * stepMs);
+      for (const { n, inst: i } of song.current) if (n.start === s) playNoteFor(i, state.key, n.row, n.length * stepMs);
       s = (s + 1) % LOOP_STEPS;
     };
     tick();
     const id = setInterval(tick, stepMs);
     return () => clearInterval(id);
-  }, [playing, notes, stepMs, state.key, inst]);
+  }, [playing, stepMs, state.key]);
 
   const onChange = (next: Note[]) => {
     setNotes(next);
@@ -78,11 +93,12 @@ export function Compose({ state, me }: { state: State; me: Player }) {
         rows={drums ? DRUM_ROWS.length : undefined}
         rowLabels={drums ? DRUM_ROWS : undefined}
         playhead={playing ? step : -1}
+        others={others}
       />
       {rejected && <P color="#FF5252">{rejected}</P>}
       <Btn label={playing ? '■ Stop preview' : '▶ Preview'} color={playing ? '#444' : '#6C63FF'} onPress={() => setPlaying(!playing)} />
       <P color={left === 0 ? FG : undefined}>
-        {left === 0 ? "Time's up! Your part is locked in." : 'Your part loops when the conductor cues you in. Empty parts get a default.'}
+        {left === 0 ? "Time's up! Your part is locked in." : 'Everyone writes one 16-bar song: notes can’t overlap anyone’s. Your notes play when the conductor cues you in; an empty part gets filled in.'}
       </P>
     </Screen>
   );

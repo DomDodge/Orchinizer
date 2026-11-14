@@ -29,7 +29,7 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 | Instruments | Humans pick unique instruments from host-enabled strings, wind, percussion, and keys sections. See `InstrumentGroups` / `INSTRUMENT_GROUPS`. Picks persist between rounds and games. Bots fill unused active instruments |
 | Scale | Major pentatonic `[0,2,4,7,9]` semitones above `state.key`. Grid row 0 is the lowest note |
 | Grid | `steps[row][step]`: 5 rows × 8 steps (one bar of eighth notes) |
-| Notes | The note editor's alternative to the grid. Each note is `{id, row, start, length, instrument?}`, with times in steps: 4 per beat (16th notes), and every part loops at 32 steps (2 bars). Up to 16 notes per player. A note fits inside the loop, two notes on the same row can't overlap, and `instrument` (if set) must be enabled in this game |
+| Notes | The note editor's part. Each note is `{id, row, start, length, instrument?}`, with times in steps: 4 per beat (16th notes). Everyone writes on one **shared sheet**, the song: 256 steps (16 bars), played from the top in perform. Up to 16 notes per player, each 1–8 steps long. The song is monophonic: no note may overlap any other player's or your own, on any row, and at least 1 step of rest separates one note's end from the next one's start. `instrument` (if set) must be enabled in this game. Every seat's notes are in `state.notes`, so phones can draw the whole sheet |
 | Deadline | Unix **milliseconds**. Phone clocks can be off, so count down with `deadline - serverTime - (Date.now() - receivedAt)`, where `receivedAt` is when that `state` arrived |
 | Rounds | One per real player, so everyone conducts once. Bots never conduct |
 
@@ -76,7 +76,7 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 
 - **Start** (`host_action: start`): requires an attached TV and a selected instrument for every connected human. Seats still disconnected are removed, and bots fill up to 4 seats. The conductor order is every real player in join order, so there's one round per player. Bots never conduct or vote.
 - **Each round:** a new `key` and `tempo`. Human instrument picks are restored; bots take unused instruments among the enabled sections. The conductor's `instrument` is `""`, and they sit compose out. Phones should show the "You're conducting!" screen when `state.conductor` matches their seat.
-- **Compose:** patterns are accepted in the lobby (for testing) and during compose. When compose ends they lock, and an empty pattern gets a default. The TV then gets `patterns` with `locked: true`.
+- **Compose:** patterns are accepted in the lobby (for testing) and during compose. During compose a part must be `notes` on the shared sheet; a grid (`steps`) gets `bad_pattern`. A part that clashes with another player's notes also gets `bad_pattern`, naming them ("Too close to Sebas's note"), and the previous part stays. When compose ends the parts lock, and every empty part (bots, and players who wrote nothing) gets up to 8 notes in the sheet's free space. The TV then gets `patterns` with `locked: true`.
 - **Calibrate:** the conductor may send `select` and `calibrated`. `calibrated` starts perform right away.
 - **Perform:** the conductor may send `select`, `cue` and `volume`. The TV's `cue_scheduled` messages make up the replay log.
 - **A conductor who is disconnected when their round starts is skipped.**
