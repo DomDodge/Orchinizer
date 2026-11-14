@@ -227,8 +227,7 @@ func (r *Room) startCompose(conductor int) {
 					break
 				}
 			}
-			p.steps = botPattern(p.instrument)
-			p.noteCount = countNotes(p.steps)
+			// Bots write their part at the end of compose, into whatever space the humans left.
 		}
 	}
 	r.pending = map[string]protocol.Cue{}
@@ -241,11 +240,13 @@ func (r *Room) startCompose(conductor int) {
 }
 
 func (r *Room) startCalibrate() {
-	// Lock the patterns. An empty pattern gets a default so every seat plays.
+	// Lock the patterns. Seats with an empty part (bots, and players who
+	// wrote nothing) get notes in the sheet's free space so every seat plays.
+	rng := rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))
 	for _, p := range r.seatOrder() {
-		if p.seat != r.conductor && p.noteCount == 0 {
-			p.steps = defaultPattern(p.instrument)
-			p.noteCount = countNotes(p.steps)
+		if p.seat != r.conductor && p.noteCount == 0 && p.instrument != "" {
+			p.notes = fillNotes(r.sheetExcept(p), p.instrument, autoNotes, rng)
+			p.noteCount = len(p.notes)
 		}
 	}
 	r.locked = true
@@ -421,55 +422,4 @@ func (r *Room) performance(round int) *protocol.Performance {
 		}
 	}
 	return nil
-}
-
-// ---- preset patterns ----
-
-// grid builds a pattern from 5 strings, lowest row first: x = note.
-func grid(rows ...string) protocol.Grid {
-	var g protocol.Grid
-	for r, row := range rows {
-		for s, ch := range row {
-			g[r][s] = ch == 'x'
-		}
-	}
-	return g
-}
-
-var presets = map[string][]protocol.Grid{
-	"contrabass": {
-		grid("x...x...", "........", "........", "..x...x.", "........"),
-		grid("x..x..x.", "........", "........", "....x...", "........"),
-	},
-	"cello": {
-		grid("x.......", "..x.....", "....x...", "......x.", "........"),
-		grid("x...x...", "........", "..x...x.", "........", "........"),
-	},
-	"viola": {
-		grid("........", "x.x.....", "....x.x.", "........", "........"),
-		grid("........", "........", "x..x..x.", "........", ".x......"),
-	},
-	"violin": {
-		grid("........", "........", "x.......", "..x...x.", "....x..."),
-		grid("........", "........", "........", "x.x.x...", "......xx"),
-	},
-}
-
-// defaultPattern is what an empty pattern becomes at lock time.
-func defaultPattern(instrument string) protocol.Grid {
-	if ps := presets[instrument]; len(ps) > 0 {
-		return ps[0]
-	}
-	if instrument == "drums" || instrument == "timpani" || instrument == "bongos" {
-		return grid("x...x...", "..x...x.", "x.x.x.x.")
-	}
-	return grid("x...x...", "..x...x.", "....x...", "......x.", "........")
-}
-
-// botPattern is a random preset for the instrument.
-func botPattern(instrument string) protocol.Grid {
-	if ps := presets[instrument]; len(ps) > 0 {
-		return ps[rand.IntN(len(ps))]
-	}
-	return defaultPattern(instrument)
 }

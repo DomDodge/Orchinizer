@@ -125,15 +125,15 @@ func TestFullGame(t *testing.T) {
 		t.Fatal("cue accepted during compose")
 	}
 
-	// Compose ends: patterns lock, Bob's empty pattern gets the default.
+	// Compose ends: patterns lock, Bob's empty part is filled in.
 	r.onDeadline()
 	var pats protocol.Patterns
 	tv.last(protocol.TypePatterns, &pats)
 	if !pats.Locked || len(pats.Parts) != 3 {
 		t.Fatalf("patterns at lock: %+v", pats)
 	}
-	if countNotes(pats.Parts[0].Steps) == 0 {
-		t.Fatal("empty pattern didn't get a default")
+	if len(pats.Parts[0].Notes) == 0 {
+		t.Fatal("empty part wasn't filled in")
 	}
 	if tv.state(t).Phase != protocol.PhaseCalibrate {
 		t.Fatal("not calibrating")
@@ -182,7 +182,7 @@ func TestFullGame(t *testing.T) {
 	if s.Players[1].Playing || s.Players[1].Instrument != "" || s.Players[0].Instrument == "" {
 		t.Fatalf("round 2 seats: %+v", s.Players)
 	}
-	pattern(r, ada, grid("x.x.x.x.", "", "", "", ""))
+	notesMsg(r, ada, []protocol.Note{note("a", 0, 0, 2), note("b", 1, 4, 2)})
 	r.onDeadline() // compose -> calibrate
 	r.onDeadline() // calibrate times out -> perform
 	if tv.state(t).Phase != protocol.PhasePerform {
@@ -401,4 +401,15 @@ func TestMaxRounds(t *testing.T) {
 	if s := tv.state(t); s.Phase != protocol.PhaseVote || len(s.Performances) != 2 {
 		t.Fatalf("expected the vote after 2 rounds: %+v", s.Phase)
 	}
+}
+
+// grid builds a pattern from up to 5 strings, lowest row first: x = note.
+func grid(rows ...string) protocol.Grid {
+	var g protocol.Grid
+	for r, row := range rows {
+		for s, ch := range row {
+			g[r][s] = ch == 'x'
+		}
+	}
+	return g
 }

@@ -262,60 +262,42 @@ func (b *bot) act(ctx context.Context, c *conn, states <-chan protocol.State) {
 	}
 }
 
-// compose sends a random pattern, then tweaks it a few times like a person would.
+// compose writes a random part on the shared sheet, then rewrites it a few
+// times like a person would.
 func (b *bot) compose(ctx context.Context, c *conn) {
-	// Even-numbered fake players use the note editor (held notes over 2 bars), the
-	// rest the grid sequencer, so both kinds of part get exercised.
-	if b.idx%2 == 0 {
-		notes := randomNotes()
-		c.send(protocol.Pattern{Envelope: env(protocol.TypePattern, b.room), Notes: notes})
-		for range 2 + rand.IntN(3) {
-			if !sleep(ctx, time.Duration(1500+rand.IntN(4000))*time.Millisecond) {
-				return
-			}
-			notes = randomNotes()
-			c.send(protocol.Pattern{Envelope: env(protocol.TypePattern, b.room), Notes: notes})
-		}
-		return
-	}
-	g := randomGrid()
-	c.send(protocol.Pattern{Envelope: env(protocol.TypePattern, b.room), Steps: g})
-	for range 3 + rand.IntN(4) {
+	notes := b.randomNotes()
+	c.send(protocol.Pattern{Envelope: env(protocol.TypePattern, b.room), Notes: notes})
+	for range 2 + rand.IntN(3) {
 		if !sleep(ctx, time.Duration(1500+rand.IntN(4000))*time.Millisecond) {
 			return
 		}
-		r, st := rand.IntN(protocol.Rows), rand.IntN(protocol.Steps)
-		g[r][st] = !g[r][st]
-		c.send(protocol.Pattern{Envelope: env(protocol.TypePattern, b.room), Steps: g})
+		notes = b.randomNotes()
+		c.send(protocol.Pattern{Envelope: env(protocol.TypePattern, b.room), Notes: notes})
 	}
 }
 
-// randomNotes builds a valid note-editor part: one note per beat-ish slot, random
-// rows and lengths, never overlapping (each note ends before the next slot starts).
-func randomNotes() []protocol.Note {
+// slotSteps splits the song into slots that fake players take turns owning, so
+// their parts never clash on the shared sheet: a note starts a slot and ends
+// at least MinGapSteps before the next one.
+const slotSteps = protocol.MaxNoteSteps
+
+// randomNotes is a valid part in this fake's own slots, with random rows and
+// lengths and some slots left empty.
+func (b *bot) randomNotes() []protocol.Note {
 	var notes []protocol.Note
-	for start := 0; start < protocol.LoopSteps && len(notes) < protocol.MaxNotes; start += protocol.StepsPerBeat {
-		if rand.Float64() < 0.35 {
+	for slot := b.idx - 1; slot*slotSteps < protocol.LoopSteps && len(notes) < protocol.MaxNotes; slot += *n {
+		if rand.Float64() < 0.3 {
 			continue
 		}
+		start := slot * slotSteps
 		notes = append(notes, protocol.Note{
 			ID:     fmt.Sprintf("n%d", start),
 			Row:    rand.IntN(protocol.Rows),
 			Start:  start,
-			Length: 1 + rand.IntN(protocol.StepsPerBeat),
+			Length: 1 + rand.IntN(slotSteps-protocol.MinGapSteps),
 		})
 	}
 	return notes
-}
-
-func randomGrid() protocol.Grid {
-	var g protocol.Grid
-	for st := range protocol.Steps {
-		if rand.Float64() < 0.6 {
-			g[rand.IntN(protocol.Rows)][st] = true
-		}
-	}
-	return g
 }
 
 func (b *bot) calibrate(ctx context.Context, c *conn, s protocol.State) {

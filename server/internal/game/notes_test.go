@@ -11,6 +11,13 @@ func notesMsg(r *Room, c Client, notes []protocol.Note) {
 	send(r, c, protocol.Pattern{Envelope: protocol.Envelope{Type: protocol.TypePattern}, Notes: notes})
 }
 
+// tryNotes sends a part and returns the error it caused, or "" if it was accepted.
+func tryNotes(r *Room, c *fakeClient, notes []protocol.Note) string {
+	c.msgs = nil
+	notesMsg(r, c, notes)
+	return c.lastError()
+}
+
 func note(id string, row, start, length int) protocol.Note {
 	return protocol.Note{ID: id, Row: row, Start: start, Length: length}
 }
@@ -27,9 +34,12 @@ func TestValidateNotes(t *testing.T) {
 		want  string // substring of the error; "" = valid
 	}{
 		{"empty", nil, ""},
-		{"chord on different rows", []protocol.Note{note("a", 0, 0, 8), note("b", 2, 0, 8)}, ""},
-		{"back to back on one row", []protocol.Note{note("a", 1, 0, 4), note("b", 1, 4, 4)}, ""},
-		{"fills the whole loop", []protocol.Note{note("a", 0, 0, protocol.LoopSteps)}, ""},
+		{"rest between notes", []protocol.Note{note("a", 1, 0, 4), note("b", 1, 4+protocol.MinGapSteps, 4)}, ""},
+		{"longest note", []protocol.Note{note("a", 0, 0, protocol.MaxNoteSteps)}, ""},
+		{"last step of the song", []protocol.Note{note("a", 0, protocol.LoopSteps-1, 1)}, ""},
+		{"chord: the song is monophonic", []protocol.Note{note("a", 0, 0, 8), note("b", 2, 0, 8)}, "too close"},
+		{"back to back with no rest", []protocol.Note{note("a", 1, 0, 4), note("b", 3, 4, 4)}, "too close"},
+		{"too long", []protocol.Note{note("a", 0, 0, protocol.MaxNoteSteps+1)}, "at most"},
 		{"named instrument", []protocol.Note{{ID: "a", Row: 0, Start: 0, Length: 1, Instrument: "cello"}}, ""},
 		{"too many", tooMany, "at most"},
 		{"missing id", []protocol.Note{note("", 0, 0, 1)}, "bad id"},
@@ -40,17 +50,145 @@ func TestValidateNotes(t *testing.T) {
 		{"negative start", []protocol.Note{note("a", 0, -1, 2)}, "doesn't fit"},
 		{"zero length", []protocol.Note{note("a", 0, 0, 0)}, "doesn't fit"},
 		{"past the loop", []protocol.Note{note("a", 0, protocol.LoopSteps-2, 3)}, "doesn't fit"},
-		{"overlap", []protocol.Note{note("a", 3, 0, 5), note("b", 3, 4, 2)}, "overlap"},
+		{"overlap", []protocol.Note{note("a", 3, 0, 5), note("b", 3, 4, 2)}, "too close"},
+		{"out of order but apart", []protocol.Note{note("b", 0, 20, 2), note("a", 4, 0, 2)}, ""},
 		{"unknown instrument", []protocol.Note{{ID: "a", Row: 0, Start: 0, Length: 1, Instrument: "kazoo"}}, "isn't in this game"},
 	}
 	for _, tc := range cases {
-		got := validateNotes(tc.notes, allowed)
+		got := validateNotes(tc.notes, allowed, nil)
 		if tc.want == "" && got != "" {
 			t.Errorf("%s: want valid, got %q", tc.name, got)
 		}
 		if tc.want != "" && !strings.Contains(got, tc.want) {
 			t.Errorf("%s: want error containing %q, got %q", tc.name, tc.want, got)
 		}
+	}
+}
+
+func TestValidateNotesAgainstTheSheet(t *testing.T) {
+	sebas := []sheetNote{{Note: note("s1", 2, 16, 4), owner: "Sebas"}} // steps 16-19
+	cases := []struct {
+		name  string
+		notes []protocol.Note
+		want  string
+	}{
+		{"before, with rest", []protocol.Note{note("a", 0, 10, 4)}, ""}, // ends at 14
+		{"after, with rest", []protocol.Note{note("a", 0, 20+protocol.MinGapSteps, 2)}, ""},
+		{"same step, other row", []protocol.Note{note("a", 4, 16, 1)}, "Too close to Sebas's note"},
+		{"runs into it", []protocol.Note{note("a", 0, 12, 4)}, "Too close to Sebas's note"}, // ends at 16
+		{"starts right after", []protocol.Note{note("a", 0, 20, 2)}, "Too close to Sebas's note"},
+		{"inside it", []protocol.Note{note("a", 1, 17, 1)}, "Too close to Sebas's note"},
+	}
+	for _, tc := range cases {
+		got := validateNotes(tc.notes, nil, sebas)
+		if tc.want == "" && got != "" {
+			t.Errorf("%s: want valid, got %q", tc.name, got)
+		}
+		if tc.want != "" && !strings.Contains(got, tc.want) {
+			t.Errorf("%s: want error containing %q, got %q", tc.name, tc.want, got)
+		}
+	}
+}
+
+func TestPlayersShareOneSheet(t *testing.T) {
+	r := newTestRoom()
+	tv := joinTV(r)
+	joinPlayer(r, "Ada") // conducts round 1
+	bob := joinPlayer(r, "Bob")
+	cy := joinPlayer(r, "Cy")
+	host(r, tv, protocol.HostStart)
+
+	if e := tryNotes(r, bob, []protocol.Note{note("b1", 0, 0, 4)}); e != "" {
+		t.Fatalf("bob's note rejected: %s", e)
+	}
+	// Cy can't write over or right up against Bob's note, on any row...
+	if e := tryNotes(r, cy, []protocol.Note{note("c1", 3, 2, 2)}); !strings.Contains(e, "Too close to Bob's note") {
+		t.Fatalf("want a conflict with Bob, got %q", e)
+	}
+	if len(r.players[3].notes) != 0 {
+		t.Fatalf("rejected part was stored: %+v", r.players[3].notes)
+	}
+	// ...but can after a rest.
+	if e := tryNotes(r, cy, []protocol.Note{note("c1", 3, 4+protocol.MinGapSteps, 2)}); e != "" {
+		t.Fatalf("cy's note after a rest rejected: %s", e)
+	}
+	// Every phone sees the whole sheet.
+	if s := bob.state(t); len(s.Notes[2]) != 1 || len(s.Notes[3]) != 1 {
+		t.Fatalf("sheet in state: %+v", s.Notes)
+	}
+	// Bob can resize his own note freely, but not into Cy.
+	if e := tryNotes(r, bob, []protocol.Note{note("b1", 0, 0, 5)}); !strings.Contains(e, "Too close to Cy's note") {
+		t.Fatalf("want a conflict with Cy, got %q", e)
+	}
+	if e := tryNotes(r, bob, []protocol.Note{note("b1", 0, 0, 2)}); e != "" {
+		t.Fatalf("shortening bob's note rejected: %s", e)
+	}
+}
+
+func TestEmptyPartsAreFilledAroundTheSheet(t *testing.T) {
+	r := newTestRoom()
+	tv := joinTV(r)
+	joinPlayer(r, "Ada") // conducts
+	bob := joinPlayer(r, "Bob")
+	joinPlayer(r, "Cy") // writes nothing
+	host(r, tv, protocol.HostStart)
+	// Bob fills most of the song: a note every 8 steps leaves 1-step holes only.
+	var part []protocol.Note
+	for i := 0; i < protocol.MaxNotes; i++ {
+		part = append(part, note(strings.Repeat("b", i+1), 0, i*8, 7))
+	}
+	notesMsg(r, bob, part)
+	if e := bob.lastError(); e != "" {
+		t.Fatalf("bob's part rejected: %s", e)
+	}
+	host(r, tv, protocol.HostNext) // lock -> calibrate
+
+	var sheet []sheetNote
+	for _, p := range r.seatOrder() {
+		if p.seat == r.conductor {
+			continue
+		}
+		if len(p.notes) == 0 {
+			t.Fatalf("seat %d (%s, bot=%v) has no part after lock", p.seat, p.instrument, p.bot)
+		}
+		if p.noteCount != len(p.notes) {
+			t.Fatalf("seat %d noteCount %d != %d notes", p.seat, p.noteCount, len(p.notes))
+		}
+		if p.seat != 2 && len(p.notes) > autoNotes {
+			t.Fatalf("seat %d got %d auto notes", p.seat, len(p.notes))
+		}
+		for _, n := range p.notes {
+			sheet = append(sheet, sheetNote{Note: n, owner: p.name})
+		}
+	}
+	// The filled sheet still keeps every rule.
+	if e := validateNotes(nil, nil, sheet); e != "" {
+		t.Fatalf("filled sheet breaks the rules: %s", e)
+	}
+	// Bob's 8 bars are full, so the fill landed in the other 8.
+	for _, sn := range sheet {
+		if sn.owner != "Bob" && sn.Start < protocol.MaxNotes*8 {
+			t.Fatalf("auto note inside Bob's bars: %+v", sn)
+		}
+	}
+}
+
+func TestGridsAreRejectedInCompose(t *testing.T) {
+	r := newTestRoom()
+	tv := joinTV(r)
+	joinPlayer(r, "Ada")
+	bob := joinPlayer(r, "Bob")
+	var g protocol.Grid
+	g[0][0] = true
+	pattern(r, bob, g) // the lobby still takes grids, for testing
+	if e := bob.lastError(); e != "" {
+		t.Fatalf("lobby grid rejected: %s", e)
+	}
+	host(r, tv, protocol.HostStart)
+	pattern(r, bob, g)
+	var e protocol.Error
+	if !bob.last(protocol.TypeError, &e) || e.Code != protocol.ErrBadPattern || !strings.Contains(e.Message, "note editor") {
+		t.Fatalf("want bad_pattern for a grid in compose, got %+v", e)
 	}
 }
 
@@ -65,7 +203,7 @@ func TestNotesFlowThroughTheGame(t *testing.T) {
 	}
 
 	// Bob (seat 2) composes with the note editor.
-	part := []protocol.Note{note("a", 0, 0, 4), note("b", 4, 8, 12)}
+	part := []protocol.Note{note("a", 0, 0, 4), note("b", 4, 8, 6)}
 	notesMsg(r, bob, part)
 	if e := bob.lastError(); e != "" {
 		t.Fatalf("valid notes rejected: %s", e)
@@ -96,8 +234,8 @@ func TestNotesFlowThroughTheGame(t *testing.T) {
 
 	// An invalid part is rejected and the previous one stays.
 	notesMsg(r, bob, []protocol.Note{note("a", 0, 0, 4), note("b", 0, 2, 4)})
-	if !strings.Contains(bob.lastError(), "overlap") {
-		t.Fatalf("want overlap error, got %q", bob.lastError())
+	if !strings.Contains(bob.lastError(), "too close") {
+		t.Fatalf("want too-close error, got %q", bob.lastError())
 	}
 	if got := r.players[2].notes; len(got) != 2 || got[1] != part[1] {
 		t.Fatalf("rejected part replaced the old one: %+v", got)
@@ -137,27 +275,6 @@ func TestNotesFlowThroughTheGame(t *testing.T) {
 		t.Fatalf("notes not reset for round 2: %+v", r.players[2].notes)
 	}
 	_ = ada
-}
-
-func TestGridPatternsStillWork(t *testing.T) {
-	r := newTestRoom()
-	tv := joinTV(r)
-	joinPlayer(r, "Ada")
-	bob := joinPlayer(r, "Bob")
-	host(r, tv, protocol.HostStart)
-	var g protocol.Grid
-	g[0][0], g[2][4] = true, true
-	pattern(r, bob, g)
-	if e := bob.lastError(); e != "" {
-		t.Fatalf("grid pattern rejected: %s", e)
-	}
-	s := tv.state(t)
-	if s.Players[1].NoteCount != 2 || s.Patterns[2] != g {
-		t.Fatalf("grid part: noteCount=%d pattern=%v", s.Players[1].NoteCount, s.Patterns[2])
-	}
-	if s.Notes != nil {
-		t.Fatalf("grid-only game should send no notes, got %+v", s.Notes)
-	}
 }
 
 func TestBadPatternCode(t *testing.T) {

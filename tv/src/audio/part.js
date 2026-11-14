@@ -1,9 +1,11 @@
 // A player's part, whichever editor their phone used, as one list of notes.
 //
-// Phones send either a grid (5 rows x 8 eighth notes, one bar) or, from the note editor,
-// `notes`: [{ id, row, start, length, instrument? }] in 16th-note steps looping every
-// 32 steps (2 bars). See /protocol. Everything here is in 16th-note steps.
+// Phones write notes on one shared sheet, the song: `notes`: [{ id, row, start, length,
+// instrument? }] in 16th-note steps over SONG_STEPS (16 bars), each player's part a slice of
+// it. Older phones may send a grid (5 rows x 8 eighth notes, one bar) instead. See /protocol.
+// Everything here is in 16th-note steps.
 export const STEPS_PER_BEAT = 4
+export const SONG_STEPS = 256 // 16 bars; /protocol LOOP_STEPS
 
 // -> { loopSteps, notes: [{ row, start, length, instrument, fromGrid }] }
 // `instrument` is '' for "the player's own instrument". Grid notes (fromGrid) are drawn as
@@ -11,7 +13,7 @@ export const STEPS_PER_BEAT = 4
 export function partNotes(pattern) {
   if (pattern?.notes?.length) {
     return {
-      loopSteps: 32,
+      loopSteps: SONG_STEPS,
       notes: pattern.notes.map((n) => ({
         row: n.row,
         start: n.start,

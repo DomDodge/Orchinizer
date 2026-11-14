@@ -259,8 +259,10 @@ export const MAJOR_PENTATONIC = [0, 2, 4, 7, 9];
 
 // NOTATION ADDITIONS
 export const STEPS_PER_BEAT = 4;  // 16th notes
-export const LOOP_STEPS = 32;     // 2 bars
-export const MAX_NOTES = 16;
+export const LOOP_STEPS = 256;    // 16 bars: the shared song everyone composes on
+export const MAX_NOTES = 16;      // per player
+export const MAX_NOTE_STEPS = 8;  // longest note: half a bar
+export const MIN_GAP_STEPS = 1;   // rest between consecutive notes on the sheet (any players)
 
 export interface Note {
   id: string;

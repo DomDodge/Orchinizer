@@ -192,7 +192,7 @@ type Note struct {
 	ID         string `json:"id"`                   // unique within the part
 	Row        int    `json:"row"`                  // 0 = lowest note of the scale
 	Start      int    `json:"start"`                // step, 0..LoopSteps-1
-	Length     int    `json:"length"`               // steps, start+length <= LoopSteps
+	Length     int    `json:"length"`               // steps, 1..MaxNoteSteps; start+length <= LoopSteps
 	Instrument string `json:"instrument,omitempty"` // "" = the player's instrument
 }
 

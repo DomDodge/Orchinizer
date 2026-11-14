@@ -10,26 +10,18 @@ const KEYS = [['C', 96], ['G', 104], ['F', 88], ['D', 112], ['A', 100], ['Bb', 1
 const ROUNDS = Number(new URLSearchParams(location.search).get('rounds')) || 3
 
 // Base phase lengths in ms (scaled by ?speed=).
-const LEN = { compose: 12000, calibrate: 7000, perform: 32000, votePerRound: 10000 }
+const LEN = { compose: 12000, calibrate: 7000, perform: 45000, votePerRound: 10000 }
 
 const rand = (n) => Math.floor(Math.random() * n)
 const pick = (a) => a[rand(a.length)]
 
-function randomGrid(instrument) {
-  const rows = instrument === 'drums' ? 3 : 5 // drums: kick, snare, hat
-  const grid = Array.from({ length: 5 }, (_, r) =>
-    Array.from({ length: 8 }, () => r < rows && Math.random() < 0.25),
-  )
-  if (instrument === 'drums') grid[0][0] = grid[0][4] = true // keep a pulse
-  return grid
-}
-
-// A note-editor part: held notes in 16th steps over a 2-bar (32-step) loop, never overlapping.
-function randomNotes() {
+// A part on the shared sheet (16 bars of 16th steps). Players take turns owning 8-step slots,
+// so parts never clash, like the real server's rule: notes never overlap and rest 1 step apart.
+function randomNotes(index, count) {
   const notes = []
-  for (let start = 0; start < 32; start += 4) {
-    if (Math.random() < 0.35) continue
-    notes.push({ id: `n${start}`, row: rand(5), start, length: 1 + rand(4) })
+  for (let slot = index; slot * 8 < 256 && notes.length < 16; slot += count) {
+    if (Math.random() < 0.3) continue
+    notes.push({ id: `n${slot}`, row: rand(5), start: slot * 8, length: 1 + rand(7) })
   }
   return notes
 }
@@ -37,7 +29,7 @@ function randomNotes() {
 export function createMockServer(deliver) {
   const room = Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[rand(24)]).join('')
   let players = []
-  let patterns = {} // seat -> grid (grid-sequencer phones)
+  let patterns = {} // seat -> grid; always empty now that everyone writes on the shared sheet
   let notes = {} // seat -> notes (note-editor phones: the even seats here)
   let s = {} // phase, round, conductor, key, tempo, deadline, performances, winner
   let timers = []
@@ -101,18 +93,15 @@ export function createMockServer(deliver) {
     notes = {}
     players.forEach((p) => (p.noteCount = 0))
     phase('compose', LEN.compose, { round, conductor: conductorFor(round), key, tempo })
-    // Patterns are decided now; the TV only shows note counts until compose ends.
-    const editor = (p) => p.seat % 2 === 0
-    const hidden = Object.fromEntries(performers().filter((p) => !editor(p)).map((p) => [p.seat, randomGrid(p.instrument)]))
-    const hiddenNotes = Object.fromEntries(performers().filter(editor).map((p) => [p.seat, randomNotes()]))
+    // Parts are decided now; the TV only shows note counts until compose ends.
+    const band = performers()
+    const hiddenNotes = Object.fromEntries(band.map((p, i) => [p.seat, randomNotes(i, band.length)]))
     every(400, () => {
-      const p = pick(performers())
-      const total = editor(p) ? hiddenNotes[p.seat].length : hidden[p.seat].flat().filter(Boolean).length
-      p.noteCount = Math.min(total, p.noteCount + 1)
+      const p = pick(band)
+      p.noteCount = Math.min(hiddenNotes[p.seat].length, p.noteCount + 1)
       pushState()
     })
     nextPhase = () => {
-      patterns = hidden
       notes = hiddenNotes
       calibrate()
     }
