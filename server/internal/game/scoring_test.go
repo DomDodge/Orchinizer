@@ -1,60 +1,70 @@
 package game
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"orchinizer/protocol"
 )
 
-func scoringFixture() *roundScorer {
-	start := time.UnixMilli(1_000_000)
-	return newRoundScorer([]protocol.Part{{Seat: 2}, {Seat: 3}, {Seat: 4}}, 120, start, start.Add(45*time.Second))
+// songParts is a song of n notes, one a second at 120 bpm (8 steps of 125 ms) from
+// step 8, seats 2, 3, 4 in turn. Every 4th note is 4 steps long (a 500 ms hold).
+func songParts(n int) []protocol.Part {
+	parts := []protocol.Part{{Seat: 2}, {Seat: 3}, {Seat: 4}}
+	for i := 0; i < n; i++ {
+		length := 1
+		if i%4 == 3 {
+			length = protocol.HoldMinSteps
+		}
+		p := &parts[i%3]
+		p.Notes = append(p.Notes, protocol.Note{ID: fmt.Sprint(i), Start: 8 + i*8, Length: length})
+	}
+	return parts
 }
 
-// play hits target i perfectly: a flick on the beat, or a hold aimed at for its whole length.
+func scoringFixture() *roundScorer {
+	start := time.UnixMilli(1_000_000)
+	return newRoundScorer(songParts(30), 120, start, start.Add(45*time.Second))
+}
+
+// play hits target i perfectly: a flick on its note, and for a hold, aimed at for its whole length.
 func play(s *roundScorer, i int, id string) {
 	target := s.state.Targets[i]
 	s.aimAt(target.Seat, target.At)
+	s.attempt(protocol.Cue{ID: id, Seat: target.Seat}, target.At)
 	if target.Kind == protocol.TargetHold {
 		s.expire(target.End + 1)
-		return
 	}
-	s.attempt(protocol.Cue{ID: id, Seat: target.Seat, Action: target.Action}, target.At)
 }
 
-func TestScoreTargets(t *testing.T) {
+func TestScoreTargetsFollowTheSong(t *testing.T) {
 	s := scoringFixture()
-	if len(s.state.Targets) != 15 || s.state.Summary.Total != 15 {
+	if len(s.state.Targets) != 30 || s.state.Summary.Total != 30 {
 		t.Fatalf("targets: %+v", s.state)
 	}
-	playing := map[int]bool{}
 	for i, target := range s.state.Targets {
-		if target.ID != i+1 || target.Seat != 2+i%3 || (target.At-1_000_000)%2000 != 0 || (i > 0 && target.At <= s.state.Targets[i-1].At) {
+		if target.ID != i+1 || target.Seat != 2+i%3 || target.At != 1_001_000+int64(i)*1000 || target.Result != "pending" {
 			t.Fatalf("target %d: %+v", i, target)
 		}
-		if i%4 == 3 { // every 4th is a 3-beat hold (120 bpm: 1500 ms), with no cue action
-			if target.Kind != protocol.TargetHold || target.End != target.At+1500 || target.Action != "" {
-				t.Fatalf("hold %d: %+v", i, target)
-			}
-			continue
-		}
-		want := protocol.CueIn
-		if playing[target.Seat] {
-			want = protocol.CueOut
-		}
-		playing[target.Seat] = !playing[target.Seat]
-		if target.Kind != protocol.TargetFlick || target.Action != want || target.End != 0 {
-			t.Fatalf("flick %d: %+v", i, target)
+		hold := i%4 == 3
+		if hold != (target.Kind == protocol.TargetHold) || (hold && target.End != target.At+500) || (!hold && target.End != 0) {
+			t.Fatalf("kind %d: %+v", i, target)
 		}
 	}
+	// Notes that can't be judged before perform ends are left off; grid-only parts have no notes.
 	start := time.UnixMilli(1_000_000)
-	slower := newRoundScorer([]protocol.Part{{Seat: 2}}, 84, start, start.Add(45*time.Second))
-	if len(slower.state.Targets) != len(s.state.Targets) {
-		t.Fatal("tempo changes scoring opportunities")
+	short := newRoundScorer(songParts(30), 120, start, start.Add(5*time.Second))
+	if len(short.state.Targets) != 4 {
+		t.Fatalf("short perform: %d targets", len(short.state.Targets))
 	}
-	if len(newRoundScorer(nil, 120, time.Now(), time.Now()).state.Targets) != 0 {
-		t.Fatal("empty orchestra has targets")
+	if len(newRoundScorer([]protocol.Part{{Seat: 2, Steps: grid("x.......")}}, 120, start, start.Add(45*time.Second)).state.Targets) != 0 {
+		t.Fatal("grid part made targets")
+	}
+	// Notes on the same step are ordered by seat.
+	same := newRoundScorer([]protocol.Part{{Seat: 3, Notes: []protocol.Note{{Start: 8, Length: 1}}}, {Seat: 2, Notes: []protocol.Note{{Start: 8, Length: 1}}}}, 120, start, start.Add(45*time.Second))
+	if same.state.Targets[0].Seat != 2 || same.state.Targets[1].Seat != 3 {
+		t.Fatalf("same-step order: %+v", same.state.Targets)
 	}
 }
 
@@ -69,7 +79,7 @@ func TestScoreTimingWindows(t *testing.T) {
 	} {
 		s := scoringFixture()
 		target := s.state.Targets[0]
-		s.attempt(protocol.Cue{ID: "test", Seat: target.Seat, Action: target.Action}, target.At+tc.offset)
+		s.attempt(protocol.Cue{ID: "test", Seat: target.Seat}, target.At+tc.offset)
 		if s.state.Targets[0].Result != tc.result || s.state.Summary.Points != tc.points {
 			t.Fatalf("offset %d: %+v", tc.offset, s.state)
 		}
@@ -81,10 +91,10 @@ func TestScoreComboMissAndDuplicates(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		target := s.state.Targets[i]
 		if target.Kind == protocol.TargetHold {
-			play(s, i, "")
+			play(s, i, "hold")
 			continue
 		}
-		cue := protocol.Cue{ID: string(rune('a' + i)), Seat: target.Seat, Action: target.Action}
+		cue := protocol.Cue{ID: string(rune('a' + i)), Seat: target.Seat}
 		if !s.attempt(cue, target.At) || s.attempt(cue, target.At) {
 			t.Fatal("duplicate cue not ignored")
 		}
@@ -93,18 +103,18 @@ func TestScoreComboMissAndDuplicates(t *testing.T) {
 		t.Fatalf("combo: %+v", s.state)
 	}
 	target := s.state.Targets[5]
-	s.attempt(protocol.Cue{ID: "wrong", Seat: 99, Action: target.Action}, target.At)
-	s.attempt(protocol.Cue{ID: "retry", Seat: target.Seat, Action: target.Action}, target.At)
+	s.attempt(protocol.Cue{ID: "wrong", Seat: 99}, target.At)
+	s.attempt(protocol.Cue{ID: "retry", Seat: target.Seat}, target.At)
 	if s.state.Combo != 0 || s.state.Summary.Misses != 1 || s.state.Summary.Points != 600 {
 		t.Fatalf("wrong seat can be retried: %+v", s.state)
 	}
 	target = s.state.Targets[6]
-	s.attempt(protocol.Cue{ID: "recover", Seat: target.Seat, Action: target.Action}, target.At)
+	s.attempt(protocol.Cue{ID: "recover", Seat: target.Seat}, target.At)
 	if s.state.Last.Points != 100 || s.state.Combo != 1 {
 		t.Fatal("combo didn't reset")
 	}
-	// Target 7 is a hold on seat 3, but the conductor is still aimed at seat 2.
-	if !s.expire(s.state.Targets[7].End+1) || s.state.Combo != 0 || s.state.Summary.Misses != 2 {
+	// Target 7 is a hold nobody flicked: it misses once its flick window closes.
+	if !s.expire(s.state.Targets[7].At+hitWindowMS+1) || s.state.Combo != 0 || s.state.Summary.Misses != 2 {
 		t.Fatal("unplayed target didn't miss")
 	}
 	if s.expire(s.state.Targets[7].End + 2) {
@@ -116,19 +126,13 @@ func TestScoreComboMissAndDuplicates(t *testing.T) {
 	}
 }
 
-func TestScoreMultiplierCapAndWrongAction(t *testing.T) {
-	start := time.UnixMilli(1_000_000)
-	s := newRoundScorer([]protocol.Part{{Seat: 2}, {Seat: 3}, {Seat: 4}}, 120, start, start.Add(65*time.Second))
+func TestScoreMultiplierCap(t *testing.T) {
+	s := scoringFixture()
 	for i := 0; i < 20; i++ {
 		play(s, i, string(rune('a'+i)))
 	}
 	if s.state.Last.Points != 400 || s.state.Summary.MaxCombo != 20 {
-		t.Fatal("multiplier should cap at 4x")
-	}
-	target := s.state.Targets[20]
-	s.attempt(protocol.Cue{ID: "bad-action", Seat: target.Seat, Action: "all_out"}, target.At)
-	if s.state.Last.Result != "miss" || s.state.Combo != 0 {
-		t.Fatal("wrong action scored")
+		t.Fatalf("multiplier should cap at 4x: %+v", s.state.Last)
 	}
 }
 
@@ -143,9 +147,9 @@ func TestRoomScoringAuthorityPersistenceAndReset(t *testing.T) {
 	if r.scorer == nil || tv.state(t).Scoring == nil {
 		t.Fatal("missing scoring state")
 	}
-	r.scorer.state.Targets[0].At = time.Now().UnixMilli()
-	target := r.scorer.state.Targets[0]
-	cue := protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "score-cue", Seat: target.Seat, Action: target.Action}
+	// One flick on Bob's seat, due now (the bots' song notes are random).
+	r.scorer.state.Targets = []protocol.CueTarget{{ID: 1, Kind: protocol.TargetFlick, Seat: 2, At: time.Now().UnixMilli(), Result: "pending"}}
+	cue := protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "score-cue", Seat: 2}
 	send(r, player, cue)
 	if r.scorer.state.Summary.Points != 0 {
 		t.Fatal("non-conductor scored")
@@ -154,10 +158,9 @@ func TestRoomScoringAuthorityPersistenceAndReset(t *testing.T) {
 	if tv.state(t).Scoring.Summary.Points != 100 {
 		t.Fatal("conductor didn't score")
 	}
-	send(r, tv, protocol.CueScheduled{Envelope: protocol.Envelope{Type: protocol.TypeCueScheduled}, ID: cue.ID, Seat: cue.Seat, Action: cue.Action, Beat: 4})
 	send(r, conductor, cue)
 	if r.scorer.state.Summary.Points != 100 || r.scorer.state.Combo != 1 {
-		t.Fatal("TV scheduling or retry awarded twice")
+		t.Fatal("retry awarded twice")
 	}
 	var welcome protocol.Welcome
 	conductor.last(protocol.TypeWelcome, &welcome)
@@ -202,76 +205,40 @@ func TestScoreWinnerUsesPointsThenRound(t *testing.T) {
 	}
 }
 
-func TestAllOutCountsOneMissAndIgnoresRetry(t *testing.T) {
-	r := newTestRoom()
-	tv := joinTV(r)
-	conductor := joinPlayer(r, "Ada")
-	joinPlayer(r, "Bob")
-	host(r, tv, protocol.HostStart)
-	r.onDeadline()
-	r.onDeadline()
-	r.scorer.state.Targets[0].At = time.Now().UnixMilli()
-	stop := protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "stop-all", Seat: 0, Action: protocol.CueAllOut}
-	send(r, conductor, stop)
-	send(r, conductor, stop)
-	if r.scorer.state.Summary.Misses != 1 || r.scorer.state.Summary.Points != 0 || len(r.pending) != 3 {
-		t.Fatalf("all-out: %+v, pending %d", r.scorer.state, len(r.pending))
-	}
-	for _, cue := range r.pending {
-		send(r, tv, protocol.CueScheduled{Envelope: protocol.Envelope{Type: protocol.TypeCueScheduled}, ID: cue.ID, Seat: cue.Seat, Action: cue.Action, Beat: 4})
-	}
-	if r.scorer.state.Summary.Misses != 1 || r.scorer.state.Summary.Points != 0 {
-		t.Fatal("expanded audio acks changed score")
-	}
-}
-
-func TestHoldScoredByShareOfTimeAimed(t *testing.T) {
+func TestHoldNeedsTheFlickThenTheAim(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
+		flick  int64 // ms after the note, or -1 for no flick
 		aim    func(s *roundScorer, seat int, at, end int64)
 		result string
 	}{
-		{"whole hold", func(s *roundScorer, seat int, at, end int64) { s.aimAt(seat, at-500) }, "perfect"},
-		{"late by 10%", func(s *roundScorer, seat int, at, end int64) { s.aimAt(seat, at+(end-at)/10) }, "perfect"},
-		{"drifts off for 30%", func(s *roundScorer, seat int, at, end int64) {
+		{"whole hold", 0, func(s *roundScorer, seat int, at, end int64) { s.aimAt(seat, at-500) }, "perfect"},
+		{"late by 10%", 0, func(s *roundScorer, seat int, at, end int64) { s.aimAt(seat, at+(end-at)/10) }, "perfect"},
+		{"drifts off for 30%", 0, func(s *roundScorer, seat int, at, end int64) {
 			s.aimAt(seat, at)
 			s.aimAt(seat+1, end-(end-at)*3/10)
 		}, "good"},
-		{"only half", func(s *roundScorer, seat int, at, end int64) { s.aimAt(seat, at+(end-at)/2) }, "miss"},
-		{"wrong player", func(s *roundScorer, seat int, at, end int64) { s.aimAt(seat+1, at) }, "miss"},
-		{"never aimed", func(s *roundScorer, seat int, at, end int64) {}, "miss"},
+		{"good flick", 200, func(s *roundScorer, seat int, at, end int64) { s.aimAt(seat, at-500) }, "good"},
+		{"only half", 0, func(s *roundScorer, seat int, at, end int64) { s.aimAt(seat, at+(end-at)/2) }, "miss"},
+		{"never aimed", 0, func(s *roundScorer, seat int, at, end int64) {}, "miss"},
+		{"no flick", -1, func(s *roundScorer, seat int, at, end int64) { s.aimAt(seat, at-500) }, "miss"},
 	} {
 		s := scoringFixture()
+		for i := 0; i < 3; i++ {
+			play(s, i, string(rune('a'+i)))
+		}
 		hold := s.state.Targets[3]
 		tc.aim(s, hold.Seat, hold.At, hold.End)
-		if s.expire(hold.End) && s.state.Targets[3].Result != "pending" {
+		if tc.flick >= 0 {
+			s.attempt(protocol.Cue{ID: "hold", Seat: hold.Seat}, hold.At+tc.flick)
+		}
+		if s.expire(hold.End) && s.state.Targets[3].Result != "pending" && tc.flick >= 0 {
 			t.Fatalf("%s: judged before the hold ended", tc.name)
 		}
-		s.expire(hold.End + 1)
+		s.expire(hold.End + hitWindowMS + 1)
 		if got := s.state.Targets[3].Result; got != tc.result {
 			t.Fatalf("%s: got %s, want %s", tc.name, got, tc.result)
 		}
-	}
-}
-
-func TestFlickDuringHoldDoesNotConsumeIt(t *testing.T) {
-	s := scoringFixture()
-	for i := 0; i < 3; i++ {
-		play(s, i, string(rune('a'+i)))
-	}
-	hold := s.state.Targets[3]
-	s.aimAt(hold.Seat, hold.At)
-	s.attempt(protocol.Cue{ID: "oops", Seat: hold.Seat, Action: protocol.CueIn}, hold.At)
-	if s.state.Targets[3].Result != "pending" || s.state.Last.Result != "early" {
-		t.Fatalf("flick consumed the hold: %+v", s.state.Last)
-	}
-	s.expire(hold.End + 1)
-	if s.state.Targets[3].Result != "perfect" {
-		t.Fatal("hold still counts when aimed throughout")
-	}
-	final := s.finish()
-	if final.Perfect+final.Good+final.Misses != final.Total {
-		t.Fatalf("final: %+v", final)
 	}
 }
 

@@ -41,11 +41,6 @@ export default function Placeholder() {
             {p.seat} {p.instrument} {s.volumes[p.seat] ?? ''}
           </span>
         ))}
-        {s.lastCue && (
-          <span className="chip">
-            last cue: seat {s.lastCue.seat} {s.lastCue.action} on beat {s.lastCue.beat}
-          </span>
-        )}
       </div>
       <div className="ph-cols">
         <pre>{json({ ...s.game, players: undefined })}</pre>

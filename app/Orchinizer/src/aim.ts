@@ -11,9 +11,6 @@ export const TUNING = {
   volumeMinDeg: -30, // top edge 30° down = 0%
   volumeMaxDeg: 60, // top edge 60° up = 100%
   volumeEveryMs: 100,
-  downDeg: -60, // pointing down for the big finish
-  stillMs2: 1.5,
-  holdMs: 1000,
 };
 
 export type Calib = { seat: number; angle: number }[];
@@ -21,8 +18,7 @@ export type Sample = { t: number; heading: number; elevation: number; accel: num
 export type BatonEvent =
   | { type: 'select'; seat: number }
   | { type: 'flick'; seat: number }
-  | { type: 'volume'; level: number }
-  | { type: 'allOut' };
+  | { type: 'volume'; level: number };
 
 /** Signed smallest difference a - b in degrees, in [-180, 180). */
 export const angleDiff = (a: number, b: number) => ((((a - b) % 360) + 540) % 360) - 180;
@@ -68,8 +64,6 @@ export function createBaton(calib: Calib) {
   const isFlick = createFlickDetector();
   let lastVolumeAt = -Infinity;
   let lastLevel = -1;
-  let downSince: number | null = null;
-  let finished = false;
 
   return {
     get selected() {
@@ -95,17 +89,6 @@ export function createBaton(calib: Calib) {
           lastLevel = level;
           ev.push({ type: 'volume', level });
         }
-      }
-
-      if (s.elevation < TUNING.downDeg && s.accel < TUNING.stillMs2) {
-        downSince ??= s.t;
-        if (!finished && s.t - downSince >= TUNING.holdMs) {
-          finished = true;
-          ev.push({ type: 'allOut' });
-        }
-      } else {
-        downSince = null;
-        finished = false;
       }
       return ev;
     },

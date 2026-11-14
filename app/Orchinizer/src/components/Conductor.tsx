@@ -6,35 +6,27 @@ import { clearCalibration, getCalibration } from '../calibration';
 import { send, serverNow, useSecondsLeft } from '../net';
 import { motionSupported, onSample } from '../pointer';
 import { instrumentInfo, type Player, type State } from '../protocol';
-import { nextFlick } from '../scoring';
+import { nextTarget } from '../scoring';
 import { BeatRing } from './Pulse';
 import { ScorePanel } from './ScorePanel';
-import { BG, Btn, FG, H1, P, Screen, Timer } from './ui';
+import { BG, FG, H1, P, Screen, Timer } from './ui';
 
 const band = (s: State) => s.players.filter((p) => p.instrument && p.seat !== s.conductor);
 let cueN = 0;
 const cueId = () => `${Date.now().toString(36)}-${cueN++}`;
 
-/** Perform phase: point + flick to toggle parts, tilt for volume, point down and hold for the big finish. */
+/** Perform phase: point + flick to play each note as it lands on its player (keep pointing through long notes), tilt for volume. */
 export function Perform({ state }: { state: State }) {
   const left = useSecondsLeft(state.deadline);
   const [selected, setSelected] = useState(0);
   const [directions] = useState(() => getCalibration(state));
   const [buttons, setButtons] = useState(!motionSupported || directions.length === 0);
   useEffect(() => () => clearCalibration(), []);
-  const live = useRef(state.live);
-  const scoring = useRef(state.scoring);
   const sel = useRef(0);
-  useEffect(() => {
-    live.current = state.live;
-    scoring.current = state.scoring;
-  }, [state.live, state.scoring]);
 
   const cue = (seat: number) => {
     if (!seat) return;
-    const target = nextFlick(scoring.current, serverNow());
-    const action = target?.seat === seat ? target.action : live.current[seat] != null ? 'out' : 'in';
-    send({ type: 'cue', id: cueId(), seat, action });
+    send({ type: 'cue', id: cueId(), seat });
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
   };
 
@@ -56,18 +48,16 @@ export function Perform({ state }: { state: State }) {
           send({ type: 'select', seat: e.seat });
           if (e.seat) Haptics.selectionAsync();
         } else if (e.type === 'flick') cue(e.seat);
-        else if (e.type === 'volume' && live.current[sel.current] != null) send({ type: 'volume', seat: sel.current, level: e.level });
-        else if (e.type === 'allOut') {
-          send({ type: 'cue', id: cueId(), seat: 0, action: 'all_out' });
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        }
+        else if (e.type === 'volume' && sel.current) send({ type: 'volume', seat: sel.current, level: e.level });
       }
     });
   }, [buttons, directions]);
 
   const players = band(state);
   const p = players.find((x) => x.seat === selected);
-  const isLive = (x: Player) => state.live[x.seat] != null;
+  // The player whose note is up next: highlighted so the conductor knows who to play.
+  const nextSeat = nextTarget(state.scoring, serverNow())?.seat;
+  const isNext = (x: Player) => x.seat === nextSeat;
 
   return (
     <Screen bg={p ? p.color + '33' : BG}>
@@ -87,13 +77,12 @@ export function Perform({ state }: { state: State }) {
               onPressIn={() => aim(x.seat)}
               onPressOut={() => aim(0)}
               onPress={() => cue(x.seat)}
-              style={[styles.cueBtn, { borderColor: x.color, backgroundColor: isLive(x) ? x.color : '#15151F' }]}
+              style={[styles.cueBtn, { borderColor: x.color, backgroundColor: isNext(x) ? x.color : '#15151F' }]}
             >
-              <Text style={[styles.cueSeat, { color: isLive(x) ? BG : x.color }]}>{x.seat}</Text>
-              <Text style={[styles.cueName, { color: isLive(x) ? BG : FG }]}>{x.name}</Text>
+              <Text style={[styles.cueSeat, { color: isNext(x) ? BG : x.color }]}>{x.seat}</Text>
+              <Text style={[styles.cueName, { color: isNext(x) ? BG : FG }]}>{x.name}</Text>
             </Pressable>
           ))}
-          <Btn label="⏹ Everyone stop" color="#FF5252" onPress={() => send({ type: 'cue', id: cueId(), seat: 0, action: 'all_out' })} />
         </ScrollView>
       ) : (
         // Tapping while pointing cues too, as a fallback for flicks that don't register.
@@ -104,7 +93,7 @@ export function Perform({ state }: { state: State }) {
               <Text style={[styles.huge, { color: p.color }]}>{p.seat}</Text>
               <H1 color={p.color}>{p.name}</H1>
               <P color={FG}>
-                {instrumentInfo(p.instrument).emoji} {isLive(p) ? `playing · ${state.live[p.seat]}%` : 'silent'}
+                {instrumentInfo(p.instrument).emoji} volume {p.level}%
               </P>
             </>
           ) : (
@@ -115,12 +104,12 @@ export function Perform({ state }: { state: State }) {
 
       <View style={styles.liveRow}>
         {players.map((x) => (
-          <View key={x.seat} style={[styles.dot, { backgroundColor: isLive(x) ? x.color : 'transparent', borderColor: x.color }]}>
-            <Text style={{ color: isLive(x) ? BG : x.color, fontWeight: '900' }}>{x.seat}</Text>
+          <View key={x.seat} style={[styles.dot, { backgroundColor: isNext(x) ? x.color : 'transparent', borderColor: x.color }]}>
+            <Text style={{ color: isNext(x) ? BG : x.color, fontWeight: '900' }}>{x.seat}</Text>
           </View>
         ))}
       </View>
-      {!buttons && <P>{state.scoring ? 'Point at the named player, then flick or tap on NOW.' : 'Flick to cue in/out · tilt for volume · point down and hold to stop all'}</P>}
+      {!buttons && <P>Point at the player whose note is landing and flick (or tap) on NOW · keep pointing through long notes · tilt for volume</P>}
     </Screen>
   );
 }

@@ -55,7 +55,6 @@ type player struct {
 	steps      protocol.Grid
 	notes      []protocol.Note // note-editor part; nil for grid-only phones and bots
 	noteCount  int
-	playing    bool
 
 	lastPattern time.Time // last pattern broadcast, for patternChanged
 }
@@ -83,7 +82,6 @@ type Room struct {
 	tempo      int
 	categories []string
 	sequence   int
-	pending    map[string]protocol.Cue
 	locked     bool // patterns are locked (compose is over)
 	conductor  int
 	// Last accepted select/volume, for the 10/s limit.
@@ -114,7 +112,6 @@ func newRoom(code string, reg *Registry, log *slog.Logger, t Timings) *Room {
 		key:        "C",
 		tempo:      100,
 		categories: append([]string{}, protocol.CategoryNames...),
-		pending:    map[string]protocol.Cue{},
 	}
 }
 
@@ -319,7 +316,6 @@ func (r *Room) state() protocol.State {
 		TVConnected:  r.tv != nil,
 		Categories:   append([]string{}, r.categories...),
 		Patterns:     map[int]protocol.Grid{},
-		Live:         map[int]int{},
 		Performances: append([]protocol.PerformanceSummary{}, r.performances...),
 		Players:      []protocol.PlayerState{},
 		Winner:       r.winner,
@@ -342,13 +338,10 @@ func (r *Room) state() protocol.State {
 			}
 			s.Notes[p.seat] = p.notes
 		}
-		if p.playing {
-			s.Live[p.seat] = p.level
-		}
 		s.Players = append(s.Players, protocol.PlayerState{
 			Seat: p.seat, Name: p.name, Color: p.color, Instrument: p.instrument,
 			Connected: p.connected(), Bot: p.bot,
-			NoteCount: p.noteCount, Playing: p.playing,
+			NoteCount: p.noteCount, Level: p.level,
 		})
 	}
 	return s
@@ -503,8 +496,6 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
-
-func validAction(a string) bool { return a == protocol.CueIn || a == protocol.CueOut }
 
 func newToken() string {
 	b := make([]byte, 16)

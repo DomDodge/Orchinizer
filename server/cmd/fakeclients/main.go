@@ -33,7 +33,7 @@ var (
 	url     = flag.String("url", "ws://localhost:8080/ws", "server WebSocket URL")
 	room    = flag.String("room", "", "room code to join (not needed with -tv)")
 	n       = flag.Int("n", 6, "number of fake players")
-	fakeTV  = flag.Bool("tv", false, "also run a fake TV that creates the room, sends bar, and answers cues")
+	fakeTV  = flag.Bool("tv", false, "also run a fake TV that creates the room, and sends bar")
 	start   = flag.Int("start", 0, "with -tv: send host start once this many players are in (0 = never)")
 	conduct = flag.Int("conduct", 1, "while no conductor is set, which fake player (1-based) sends cues; 0 = none")
 	quiet   = flag.Bool("q", false, "only log joins, phase changes, and errors")
@@ -300,40 +300,53 @@ func (b *bot) calibrate(ctx context.Context, c *conn, s protocol.State) {
 	log.Printf("[%s] calibrated %d seats", b.name, len(angles))
 }
 
-// conduct sweeps select across seats, cues random parts in and out, and rides volume.
+// conduct plays the song: as each note on the chart lands, it points at
+// that seat and flicks, and now and then rides the volume. In the lobby
+// (no chart) it just sweeps select across the seats.
 func (b *bot) conduct(ctx context.Context, c *conn) {
-	in := map[int]bool{}
 	cueN := 0
-	selectT := time.NewTicker(200 * time.Millisecond) // 5/s, under the 10/s cap
-	defer selectT.Stop()
-	nextCue := time.After(time.Second)
+	played := map[int]bool{}
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	sweep := time.NewTicker(500 * time.Millisecond)
+	defer sweep.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-selectT.C:
-			if seats := b.otherSeats(); len(seats) > 0 {
+		case <-sweep.C:
+			b.mu.Lock()
+			charted := b.state.Scoring != nil
+			b.mu.Unlock()
+			if seats := b.otherSeats(); !charted && len(seats) > 0 {
 				c.send(protocol.Select{Envelope: env(protocol.TypeSelect, b.room), Seat: seats[rand.IntN(len(seats))]})
 			}
-		case <-nextCue:
-			nextCue = time.After(time.Duration(1000+rand.IntN(2500)) * time.Millisecond)
-			seats := b.otherSeats()
-			if len(seats) == 0 {
+		case <-tick.C:
+			b.mu.Lock()
+			var next *protocol.CueTarget
+			if sc := b.state.Scoring; sc != nil {
+				// shortcut: compares server times with this machine's clock; fine on one machine, misses more against a remote server.
+				now := time.Now().UnixMilli()
+				for i := range sc.Targets {
+					if t := &sc.Targets[i]; t.Result == "pending" && !played[t.ID] && t.At <= now {
+						next = t
+						break
+					}
+				}
+			}
+			b.mu.Unlock()
+			if next == nil {
 				continue
 			}
-			seat := seats[rand.IntN(len(seats))]
-			action := protocol.CueIn
-			if in[seat] {
-				action = protocol.CueOut
-			}
-			in[seat] = !in[seat]
+			played[next.ID] = true
 			cueN++
-			c.send(protocol.Cue{Envelope: env(protocol.TypeCue, b.room), ID: fmt.Sprintf("s%d-c%d", b.seat, cueN), Seat: seat, Action: action})
-			if rand.IntN(3) == 0 {
-				c.send(protocol.Volume{Envelope: env(protocol.TypeVolume, b.room), Seat: seat, Level: 40 + rand.IntN(61)})
+			c.send(protocol.Select{Envelope: env(protocol.TypeSelect, b.room), Seat: next.Seat})
+			c.send(protocol.Cue{Envelope: env(protocol.TypeCue, b.room), ID: fmt.Sprintf("s%d-c%d", b.seat, cueN), Seat: next.Seat})
+			if rand.IntN(4) == 0 {
+				c.send(protocol.Volume{Envelope: env(protocol.TypeVolume, b.room), Seat: next.Seat, Level: 40 + rand.IntN(61)})
 			}
 			if !*quiet {
-				log.Printf("[%s] cue %s seat %d", b.name, action, seat)
+				log.Printf("[%s] played seat %d's %s", b.name, next.Seat, next.Kind)
 			}
 		}
 	}
@@ -358,7 +371,6 @@ type tv struct {
 	room  string
 	mu    sync.Mutex
 	state protocol.State
-	cues  []protocol.Cue // waiting for the next beat
 }
 
 func newTV(ctx context.Context) (*tv, error) {
@@ -406,12 +418,6 @@ func (t *tv) run(ctx context.Context) {
 				log.Printf("[tv] %d players in, sending host start", len(s.Players))
 				t.c.send(protocol.HostAction{Envelope: env(protocol.TypeHostAction, t.room), Action: protocol.HostStart})
 			}
-		case protocol.TypeCue:
-			var m protocol.Cue
-			json.Unmarshal(data, &m)
-			t.mu.Lock()
-			t.cues = append(t.cues, m)
-			t.mu.Unlock()
 		case protocol.TypePatterns:
 			if !*quiet {
 				var m protocol.Patterns
@@ -427,21 +433,15 @@ func (t *tv) run(ctx context.Context) {
 }
 
 // clock plays the TV's role as the musical clock: one beat per quarter
-// note at the room's tempo, a bar message every 4 beats, and every waiting
-// cue reported as scheduled on the next beat.
+// note at the room's tempo, and a bar message every 4 beats.
 func (t *tv) clock(ctx context.Context) {
 	beat := 0
 	for {
 		t.mu.Lock()
 		tempo := t.state.Tempo
-		cues := t.cues
-		t.cues = nil
 		t.mu.Unlock()
 		if tempo <= 0 {
 			tempo = 100
-		}
-		for _, c := range cues {
-			t.c.send(protocol.CueScheduled{Envelope: env(protocol.TypeCueScheduled, t.room), ID: c.ID, Seat: c.Seat, Action: c.Action, Beat: beat})
 		}
 		if beat%4 == 0 {
 			t.c.send(protocol.Bar{Envelope: env(protocol.TypeBar, t.room), Bar: beat / 4, Tempo: tempo})
