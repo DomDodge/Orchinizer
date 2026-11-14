@@ -1,0 +1,84 @@
+# Deploys the Go server (and the TV page it serves) to Fly, and optionally
+# changes its settings. Run it from the Actions tab ("Deploy server" > Run
+# workflow) or with: gh workflow run deploy-server.yml -f compose_seconds=60
+#
+# Any run restarts the server, which ENDS EVERY ROOM IN PROGRESS. Run it
+# before people join, never mid-game.
+#
+# Needs the FLY_API_TOKEN repo secret: a deploy token scoped to the
+# orchinizer app (fly tokens create deploy -a orchinizer).
+name: Deploy server
+
+on:
+  workflow_dispatch:
+    inputs:
+      compose_seconds:
+        description: "Compose phase length in seconds (blank = leave as is)"
+        required: false
+      calibrate_seconds:
+        description: "Calibrate cap in seconds (blank = leave as is)"
+        required: false
+      perform_seconds:
+        description: "Perform phase length in seconds; keep >= 45 so the 16-bar song fits (blank = leave as is)"
+        required: false
+      max_rounds:
+        description: "Rounds per game, 0 = one per player (blank = leave as is)"
+        required: false
+      expo_url:
+        description: "Link the TV's QR code opens, e.g. exps://xxxx-orchinizer-demo-8081.exp.direct (blank = leave as is)"
+        required: false
+      reset_timings:
+        description: "Remove all timing overrides and go back to the defaults (180/30/45, one round per player)"
+        type: boolean
+        default: false
+
+concurrency: deploy-server
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      # Inputs go through env, never straight into the script, so odd text can't run as shell.
+      COMPOSE: ${{ inputs.compose_seconds }}
+      CALIBRATE: ${{ inputs.calibrate_seconds }}
+      PERFORM: ${{ inputs.perform_seconds }}
+      ROUNDS: ${{ inputs.max_rounds }}
+      EXPO: ${{ inputs.expo_url }}
+      RESET: ${{ inputs.reset_timings }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Stage settings (applied by the deploy below)
+        run: |
+          set -eu
+          is_num() { case "$1" in ''|*[!0-9]*) return 1;; esac; }
+          set --
+          for pair in "COMPOSE_SECONDS=$COMPOSE" "CALIBRATE_SECONDS=$CALIBRATE" "PERFORM_SECONDS=$PERFORM" "MAX_ROUNDS=$ROUNDS"; do
+            v="${pair#*=}"
+            [ -z "$v" ] && continue
+            is_num "$v" || { echo "::error::${pair%%=*} must be a whole number, got '$v'"; exit 1; }
+            set -- "$@" "$pair"
+          done
+          if [ -n "$EXPO" ]; then
+            case "$EXPO" in exp://*|exps://*) ;; *) echo "::error::expo_url must start with exp:// or exps://"; exit 1;; esac
+            set -- "$@" "EXPO_URL=$EXPO"
+          fi
+          if [ "$RESET" = "true" ]; then
+            flyctl secrets unset -a orchinizer --stage COMPOSE_SECONDS CALIBRATE_SECONDS PERFORM_SECONDS MAX_ROUNDS || true
+          fi
+          if [ "$#" -gt 0 ]; then
+            flyctl secrets set -a orchinizer --stage "$@"
+          fi
+
+      - name: Deploy
+        run: flyctl deploy --config server/fly.toml --dockerfile server/Dockerfile --ha=false --remote-only .
+
+      - name: Check it's up
+        run: |
+          sleep 5
+          curl -fsS https://orchinizer.fly.dev/healthz
+          echo
+          curl -fsS https://orchinizer.fly.dev/config
+          echo
