@@ -10,6 +10,8 @@ const (
 	TypeLeave        = "leave"
 	TypeKick         = "kick"
 	TypeKicked       = "kicked"
+	TypePing         = "ping" // any client -> server, before or after join
+	TypePong         = "pong" // server -> the client that pinged
 	TypeJoin         = "join"          // any client -> server
 	TypeWelcome      = "welcome"       // server -> the client that joined
 	TypeError        = "error"         // server -> one client

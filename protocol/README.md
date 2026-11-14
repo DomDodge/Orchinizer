@@ -14,6 +14,7 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 - Every message is a JSON text frame: `{"type": "...", "room": "KXQM", ...}`.
 - The first message must be `join`. Anything sent before it gets an `error` and the socket is closed.
 - Save the `token` from `welcome`. To reconnect, send `join` again with the same `room` and `token` (the client also resends its name) to get your seat back. The server then sends `welcome` and the full `state`. A player's `welcome` includes their current `instrument` and `steps`, so the sequencer can be restored.
+- **Keepalive:** a client may send `{"type":"ping"}` at any time, before or after `join`; the server answers `{"type":"pong"}`. Phones ping every 5 s and reconnect if they hear nothing for 15 s, because a locked or backgrounded phone can lose its socket without seeing it close.
 - Room codes are case-insensitive, and surrounding spaces are ignored.
 - A player who disconnects keeps their seat, even in the lobby (phones drop whenever a screen locks). Seats still disconnected when the host starts are removed. A full lobby does not silently reclaim offline seats; the host can kick them. An unknown token is rejected, so a removed offline client cannot automatically rejoin.
 - **TV:** store the token in `localStorage`. A TV `join` for an existing room is accepted with that token, or by anyone while no TV is connected, so a phone can't kick a live TV.
@@ -29,7 +30,7 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 | Instruments | Humans pick unique instruments from host-enabled strings, wind, percussion, and keys sections. See `InstrumentGroups` / `INSTRUMENT_GROUPS`. Picks persist between rounds and games. Bots fill unused active instruments |
 | Scale | Major pentatonic `[0,2,4,7,9]` semitones above `state.key`. Grid row 0 is the lowest note |
 | Grid | `steps[row][step]`: 5 rows × 8 steps (one bar of eighth notes) |
-| Notes | The note editor's part. Each note is `{id, row, start, length, instrument?}`, with times in steps: 4 per beat (16th notes). Everyone writes on one **shared sheet**, the song: 256 steps (16 bars), played from the top in perform. Up to 16 notes per player, each 1–8 steps long. The song is monophonic: no note may overlap any other player's or your own, on any row, and at least 1 step of rest separates one note's end from the next one's start. `instrument` (if set) must be enabled in this game. Every seat's notes are in `state.notes`, so phones can draw the whole sheet |
+| Notes | The note editor's part. Each note is `{id, row, start, length, instrument?}`, with times in steps: 4 per beat (16th notes). Everyone writes on one **shared sheet**, the song: 256 steps (16 bars), played from the top in perform. Up to 16 notes per player, each 1–8 steps long. The song is monophonic: no note may overlap any other player's or your own, on any row. Notes may touch: one can start on the step where the last one ends. `instrument` (if set) must be enabled in this game. Every seat's notes are in `state.notes`, so phones can draw the whole sheet |
 | Deadline | Unix **milliseconds**. Phone clocks can be off, so count down with `deadline - serverTime - (Date.now() - receivedAt)`, where `receivedAt` is when that `state` arrived |
 | Rounds | One per real player, so everyone conducts once. Bots never conduct |
 

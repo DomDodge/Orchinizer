@@ -283,3 +283,19 @@ func TestLowercaseRoomCodeAndWelcomePattern(t *testing.T) {
 		t.Fatalf("reconnect welcome didn't restore the pattern: %+v", w2)
 	}
 }
+
+func TestPingPong(t *testing.T) {
+	url := setup(t)
+	ping := protocol.Envelope{Type: protocol.TypePing}
+
+	// Before join: answered, and the socket stays open for the join.
+	c := dial(t, url)
+	c.send(ping)
+	c.expect(protocol.TypePong, nil)
+	c.send(protocol.Join{Envelope: protocol.Envelope{Type: "join"}, Role: "tv"})
+	c.expect("welcome", nil)
+
+	// After join: answered without going to the room (no error back).
+	c.send(ping)
+	c.expect(protocol.TypePong, nil)
+}

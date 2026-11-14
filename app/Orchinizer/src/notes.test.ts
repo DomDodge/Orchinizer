@@ -15,9 +15,10 @@ test('place shortens to leave a rest before the next note, and to fit the song',
   assert.deepEqual(place([], 0, LOOP_STEPS - 1, 'a'), [n('a', 0, LOOP_STEPS - 1, 1)]);
 });
 
-test('place refuses a taken or too-close spot, a full budget, a bad row and a reused id', () => {
+test('place refuses a taken spot, a full budget, a bad row and a reused id', () => {
   assert.equal(place([n('b', 1, 0, 4)], 1, 2, 'a'), null); // inside b
-  assert.equal(place([n('b', 1, 0, 4)], 3, 4, 'a'), null); // right after b, no rest
+  assert.equal(place([n('b', 1, 0, 4)], 3, 3, 'a'), null); // on b's last step
+  assert.deepEqual(place([n('b', 1, 0, 4)], 3, 4, 'a')?.at(-1), n('a', 3, 4, 4)); // right after b: notes may touch
   const full = Array.from({ length: MAX_NOTES }, (_, i) => n(`n${i}`, 0, i * 8, 1));
   assert.equal(place(full, 0, LOOP_STEPS - 1, 'x'), null);
   assert.equal(place([], ROWS, 0, 'a'), null);
@@ -40,14 +41,15 @@ test("conflict names the other player's note in the way", () => {
 
 test('resize stretches and shrinks, but not past the max length, the song or into a neighbor', () => {
   const notes = [n('a', 0, 0, 4), n('b', 3, 7, 4)];
-  assert.equal(resize(notes, 'a', 7 - MIN_GAP_STEPS)[0].length, 7 - MIN_GAP_STEPS); // leaves the rest
+  assert.equal(resize(notes, 'a', 7 - MIN_GAP_STEPS)[0].length, 7 - MIN_GAP_STEPS); // right up to b
   assert.equal(resize(notes, 'a', 1)[0].length, 1);
-  assert.equal(resize(notes, 'a', 7), notes); // no rest before b: snaps back
+  assert.equal(resize(notes, 'a', 8), notes); // into b: snaps back
   assert.equal(resize([n('a', 0, 0, 4)], 'a', MAX_NOTE_STEPS)[0].length, MAX_NOTE_STEPS);
   assert.equal(resize([n('a', 0, 0, 4)], 'a', MAX_NOTE_STEPS + 1)[0].length, 4); // too long
   assert.equal(resize([n('a', 0, LOOP_STEPS - 4, 4)], 'a', 5)[0].length, 4); // past the song
   assert.equal(resize(notes, 'a', 0), notes);
-  assert.equal(resize([n('a', 0, 0, 2)], 'a', 6, [n('t', 1, 6, 2)])[0].length, 2); // into another player's note
+  assert.equal(resize([n('a', 0, 0, 2)], 'a', 7, [n('t', 1, 6, 2)])[0].length, 2); // into another player's note
+  assert.equal(resize([n('a', 0, 0, 2)], 'a', 6, [n('t', 1, 6, 2)])[0].length, 6); // up to it is fine
 });
 
 test('move changes time and pitch, but not near another note or off the staff', () => {

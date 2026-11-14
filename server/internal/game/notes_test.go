@@ -34,11 +34,12 @@ func TestValidateNotes(t *testing.T) {
 		want  string // substring of the error; "" = valid
 	}{
 		{"empty", nil, ""},
-		{"rest between notes", []protocol.Note{note("a", 1, 0, 4), note("b", 1, 4+protocol.MinGapSteps, 4)}, ""},
+		{"notes in a row", []protocol.Note{note("a", 1, 0, 4), note("b", 1, 4+protocol.MinGapSteps, 4)}, ""},
 		{"longest note", []protocol.Note{note("a", 0, 0, protocol.MaxNoteSteps)}, ""},
 		{"last step of the song", []protocol.Note{note("a", 0, protocol.LoopSteps-1, 1)}, ""},
-		{"chord: the song is monophonic", []protocol.Note{note("a", 0, 0, 8), note("b", 2, 0, 8)}, "too close"},
-		{"back to back with no rest", []protocol.Note{note("a", 1, 0, 4), note("b", 3, 4, 4)}, "too close"},
+		{"chord: the song is monophonic", []protocol.Note{note("a", 0, 0, 8), note("b", 2, 0, 8)}, "clash"},
+		{"back to back: notes may touch", []protocol.Note{note("a", 1, 0, 4), note("b", 3, 4, 4)}, ""},
+		{"one step of overlap", []protocol.Note{note("a", 1, 0, 5), note("b", 3, 4, 4)}, "clash"},
 		{"too long", []protocol.Note{note("a", 0, 0, protocol.MaxNoteSteps+1)}, "at most"},
 		{"named instrument", []protocol.Note{{ID: "a", Row: 0, Start: 0, Length: 1, Instrument: "cello"}}, ""},
 		{"too many", tooMany, "at most"},
@@ -50,7 +51,7 @@ func TestValidateNotes(t *testing.T) {
 		{"negative start", []protocol.Note{note("a", 0, -1, 2)}, "doesn't fit"},
 		{"zero length", []protocol.Note{note("a", 0, 0, 0)}, "doesn't fit"},
 		{"past the loop", []protocol.Note{note("a", 0, protocol.LoopSteps-2, 3)}, "doesn't fit"},
-		{"overlap", []protocol.Note{note("a", 3, 0, 5), note("b", 3, 4, 2)}, "too close"},
+		{"overlap", []protocol.Note{note("a", 3, 0, 5), note("b", 3, 4, 2)}, "clash"},
 		{"out of order but apart", []protocol.Note{note("b", 0, 20, 2), note("a", 4, 0, 2)}, ""},
 		{"unknown instrument", []protocol.Note{{ID: "a", Row: 0, Start: 0, Length: 1, Instrument: "kazoo"}}, "isn't in this game"},
 	}
@@ -72,12 +73,14 @@ func TestValidateNotesAgainstTheSheet(t *testing.T) {
 		notes []protocol.Note
 		want  string
 	}{
-		{"before, with rest", []protocol.Note{note("a", 0, 10, 4)}, ""}, // ends at 14
-		{"after, with rest", []protocol.Note{note("a", 0, 20+protocol.MinGapSteps, 2)}, ""},
-		{"same step, other row", []protocol.Note{note("a", 4, 16, 1)}, "Too close to Sebas's note"},
-		{"runs into it", []protocol.Note{note("a", 0, 12, 4)}, "Too close to Sebas's note"}, // ends at 16
-		{"starts right after", []protocol.Note{note("a", 0, 20, 2)}, "Too close to Sebas's note"},
-		{"inside it", []protocol.Note{note("a", 1, 17, 1)}, "Too close to Sebas's note"},
+		{"before", []protocol.Note{note("a", 0, 10, 4)}, ""}, // ends at 14
+		{"after", []protocol.Note{note("a", 0, 20+protocol.MinGapSteps, 2)}, ""},
+		{"same step, other row", []protocol.Note{note("a", 4, 16, 1)}, "Clashes with Sebas's note"},
+		{"ends where it starts: touching is fine", []protocol.Note{note("a", 0, 12, 4)}, ""},
+		{"runs into it", []protocol.Note{note("a", 0, 12, 5)}, "Clashes with Sebas's note"},
+		{"starts right after: touching is fine", []protocol.Note{note("a", 0, 20, 2)}, ""},
+		{"starts on its last step", []protocol.Note{note("a", 0, 19, 2)}, "Clashes with Sebas's note"},
+		{"inside it", []protocol.Note{note("a", 1, 17, 1)}, "Clashes with Sebas's note"},
 	}
 	for _, tc := range cases {
 		got := validateNotes(tc.notes, nil, sebas)
@@ -101,23 +104,23 @@ func TestPlayersShareOneSheet(t *testing.T) {
 	if e := tryNotes(r, bob, []protocol.Note{note("b1", 0, 0, 4)}); e != "" {
 		t.Fatalf("bob's note rejected: %s", e)
 	}
-	// Cy can't write over or right up against Bob's note, on any row...
-	if e := tryNotes(r, cy, []protocol.Note{note("c1", 3, 2, 2)}); !strings.Contains(e, "Too close to Bob's note") {
+	// Cy can't write over Bob's note, on any row...
+	if e := tryNotes(r, cy, []protocol.Note{note("c1", 3, 2, 2)}); !strings.Contains(e, "Clashes with Bob's note") {
 		t.Fatalf("want a conflict with Bob, got %q", e)
 	}
 	if len(r.players[3].notes) != 0 {
 		t.Fatalf("rejected part was stored: %+v", r.players[3].notes)
 	}
-	// ...but can after a rest.
+	// ...but can right after it.
 	if e := tryNotes(r, cy, []protocol.Note{note("c1", 3, 4+protocol.MinGapSteps, 2)}); e != "" {
-		t.Fatalf("cy's note after a rest rejected: %s", e)
+		t.Fatalf("cy's note right after bob's rejected: %s", e)
 	}
 	// Every phone sees the whole sheet.
 	if s := bob.state(t); len(s.Notes[2]) != 1 || len(s.Notes[3]) != 1 {
 		t.Fatalf("sheet in state: %+v", s.Notes)
 	}
 	// Bob can resize his own note freely, but not into Cy.
-	if e := tryNotes(r, bob, []protocol.Note{note("b1", 0, 0, 5)}); !strings.Contains(e, "Too close to Cy's note") {
+	if e := tryNotes(r, bob, []protocol.Note{note("b1", 0, 0, 5)}); !strings.Contains(e, "Clashes with Cy's note") {
 		t.Fatalf("want a conflict with Cy, got %q", e)
 	}
 	if e := tryNotes(r, bob, []protocol.Note{note("b1", 0, 0, 2)}); e != "" {
@@ -234,8 +237,8 @@ func TestNotesFlowThroughTheGame(t *testing.T) {
 
 	// An invalid part is rejected and the previous one stays.
 	notesMsg(r, bob, []protocol.Note{note("a", 0, 0, 4), note("b", 0, 2, 4)})
-	if !strings.Contains(bob.lastError(), "too close") {
-		t.Fatalf("want too-close error, got %q", bob.lastError())
+	if !strings.Contains(bob.lastError(), "clash") {
+		t.Fatalf("want clash error, got %q", bob.lastError())
 	}
 	if got := r.players[2].notes; len(got) != 2 || got[1] != part[1] {
 		t.Fatalf("rejected part replaced the old one: %+v", got)

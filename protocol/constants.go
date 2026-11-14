@@ -36,14 +36,14 @@ var MajorPentatonic = [Rows]int{0, 2, 4, 7, 9}
 //
 // Everyone composes on one shared sheet, the song: LoopSteps long, played
 // (and looped) from the top in perform. The song is monophonic: no two
-// notes, from any players, overlap, and at least MinGapSteps of rest
-// separate one note's end from the next one's start.
+// notes, from any players, overlap. Notes may touch: MinGapSteps of rest
+// (currently none) separate one note's end from the next one's start.
 const (
 	StepsPerBeat = 4   // 16th notes
 	LoopSteps    = 256 // 16 bars of 4/4: the shared song
 	MaxNotes     = 16  // notes per player
 	MaxNoteSteps = 8   // longest note: half a bar
-	MinGapSteps  = 1   // rest between consecutive notes on the sheet
+	MinGapSteps  = 0   // rest required between notes: none, notes may touch
 )
 
 // RoomCodeAlphabet: room codes are 4 letters from this set (no I or O).

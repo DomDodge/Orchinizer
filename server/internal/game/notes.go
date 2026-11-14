@@ -24,7 +24,7 @@ type sheetNote struct {
 // (this game's enabled sections); others is every other player's notes.
 //
 // The sheet is one monophonic song: no two notes overlap, on any row, and
-// at least MinGapSteps of rest separate one note's end from the next start.
+// MinGapSteps of rest (currently none) separate one note's end from the next.
 func validateNotes(notes []protocol.Note, allowed []string, others []sheetNote) string {
 	if len(notes) > protocol.MaxNotes {
 		return fmt.Sprintf("You can place at most %d notes", protocol.MaxNotes)
@@ -61,11 +61,11 @@ func validateNotes(notes []protocol.Note, allowed []string, others []sheetNote) 
 		}
 		switch {
 		case a.owner == "" && b.owner == "":
-			return "Two of your notes are too close: leave a little rest between notes"
+			return "Two of your notes clash: notes can't overlap"
 		case a.owner != "":
-			return fmt.Sprintf("Too close to %s's note", a.owner)
+			return fmt.Sprintf("Clashes with %s's note", a.owner)
 		default:
-			return fmt.Sprintf("Too close to %s's note", b.owner)
+			return fmt.Sprintf("Clashes with %s's note", b.owner)
 		}
 	}
 	return ""
