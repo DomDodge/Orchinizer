@@ -1,0 +1,7 @@
+# Generated: never commit these. Each project installs its own (npm ci / npx expo).
+node_modules/
+.expo/
+dist/
+expo-env.d.ts
+.DS_Store
+*.log
