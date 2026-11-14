@@ -42,6 +42,7 @@ export default function NextRound() {
                 <b className="num">R{h.round}</b>
                 <span className="color-dot" style={{ background: c?.color }} />
                 {c?.name}
+                <b className="num">{h.score}</b>
               </span>
             )
           })}

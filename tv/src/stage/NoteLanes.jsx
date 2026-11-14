@@ -6,6 +6,10 @@
 // position (engine.timeline()) and the store (getState()) every frame, so positions come
 // straight from the audio clock and can't drift. The landing flash is the seat's own
 // flash ring, which the engine fires through Tone.Draw.
+//
+// Cue prompts (state.targets) fall down the same lanes as gold bars and touch the seat on
+// their beat: that's when the conductor should cue the seat. Hit ones disappear (Perform
+// shows the grade); one that's too late to score turns grey.
 import { useEffect, useRef } from 'react'
 import { timeline, seatOn } from '../audio/engine.js'
 import { getState } from '../state/store.js'
@@ -18,6 +22,7 @@ const R = 10 // note head radius
 const LANE_W = 96
 const ROW_GAP = 16 // horizontal offset per pitch row
 const FADE = 70 // px over which notes fade in at the top
+const MISS_AFTER_MS = 450 // GOOD_WINDOW_MS + CUE_LATENCY_MS in /protocol: later can't score
 
 function draw(ctx) {
   ctx.clearRect(0, 0, 1920, 1080)
@@ -71,6 +76,33 @@ function draw(ctx) {
       }
     }
   }
+  if (tl.running) drawTargets(ctx, game, now, ticksPerStep)
+}
+
+function drawTargets(ctx, game, now, ticksPerStep) {
+  const stepMs = 60000 / game.tempo / STEPS_PER_BEAT
+  ctx.shadowBlur = 0
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = '800 18px sans-serif'
+  for (const t of game.targets || []) {
+    if (t.grade === 'perfect' || t.grade === 'good') continue
+    const { x, y: seatY } = seatPos(t.seat)
+    const bottom = seatY - SEAT_R - 6
+    const at = t.beat * STEPS_PER_BEAT
+    const y = bottom - (at - now) * PX_PER_STEP
+    if (y < LANE_TOP || y > bottom + 30) continue
+    const missed = t.grade === 'miss' || (now - at) * stepMs > MISS_AFTER_MS
+    const label = missed ? 'MISS' : seatOn(t.seat, at * ticksPerStep - 1) ? 'OUT' : 'IN'
+    ctx.globalAlpha = Math.min(1, (y - LANE_TOP) / FADE)
+    ctx.fillStyle = missed ? 'rgba(244,241,234,0.25)' : '#F2C14E'
+    ctx.beginPath()
+    ctx.roundRect(x - LANE_W / 2 + 4, y - 14, LANE_W - 8, 28, 14)
+    ctx.fill()
+    ctx.fillStyle = '#0E1020'
+    ctx.fillText(label, x, y + 1)
+  }
+  ctx.globalAlpha = 1
 }
 
 export default function NoteLanes() {

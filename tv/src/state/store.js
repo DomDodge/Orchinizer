@@ -16,15 +16,11 @@ let state = {
   lastCue: null, // { seat, action, beat }
   calibrated: [], // seats calibrated so far
   noteCounts: {}, // seat -> notes placed during compose (counts only, never the notes)
-  votes: {}, // round -> count
   hits: {}, // seat -> notes played so far (bumped via Tone.Draw); drives seat flashes
   phaseStartedAt: 0, // when the current phase began, for countdown rings
   beat: -1, // current beat, updated via Tone.Draw
   bar: -1,
   muted: new URLSearchParams(location.search).get('mute') === '1', // ?mute=1 starts silent
-  // round -> recorded performance (patterns + cue/volume log) for replays. The engine appends
-  // to a performance's log in place; that never needs a re-render.
-  performances: {},
   messages: [], // last 10 received, newest first (debug overlay)
 }
 
@@ -54,7 +50,7 @@ export function on(type, fn) {
 // Converts the server's `state` (see /protocol) into the shape the screens use:
 //   players[].pattern = { instrument, grid, notes } once patterns lock (calibrate/perform), else null.
 //     `notes` is set for phones using the note editor; audio/part.js reads either form.
-//   history = finished performances [{ round, conductor, conductorName, key, tempo }]
+//   history = finished rounds [{ round, conductor, conductorName, key, tempo, score }]
 //   deadline = moved onto this machine's clock using serverTime, so a wrong TV clock doesn't matter
 function fromServerState(msg, prev) {
   const locked = msg.phase === 'calibrate' || msg.phase === 'perform'
@@ -73,6 +69,7 @@ function fromServerState(msg, prev) {
     conductorName: pf.conductorName,
     key: pf.key,
     tempo: pf.tempo,
+    score: pf.score,
   }))
   // Keep the converted deadline stable while the server's deadline is unchanged, so countdown
   // effects don't restart on every state message.
@@ -105,7 +102,6 @@ export function handle(msg) {
         if (msg.phase === 'perform') Object.assign(patch, { playing: {}, volumes: {}, lastCue: null })
       }
       patch.noteCounts = Object.fromEntries(game.players.map((p) => [p.seat, p.noteCount || 0]))
-      patch.votes = Object.fromEntries((msg.performances || []).map((pf) => [pf.round, pf.votes]))
       break
     }
     case 'select':
@@ -141,9 +137,7 @@ export function setCue(seat, action, beat) {
 }
 export const setVolume = (seat, level) => set({ volumes: { ...state.volumes, [seat]: level } })
 export const bumpHit = (seat) => set({ hits: { ...state.hits, [seat]: (state.hits[seat] || 0) + 1 } })
-export const setReplayState = (playing, volumes) => set({ playing, volumes, hits: {}, lastCue: null })
 export const resetPlayback = () => set({ playing: {}, hits: {}, beat: -1, bar: -1 })
-export const savePerformance = (p) => set({ performances: { ...state.performances, [p.round]: p } })
 
 export const playerBySeat = (seat) => state.game?.players?.find((p) => p.seat === seat)
 

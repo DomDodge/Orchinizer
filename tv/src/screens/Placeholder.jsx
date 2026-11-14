@@ -50,7 +50,7 @@ export default function Placeholder() {
       <div className="ph-cols">
         <pre>{json({ ...s.game, players: undefined })}</pre>
         <pre>
-          {json({ selected: s.selected, volumes: s.volumes, calibrated: s.calibrated, noteCounts: s.noteCounts, votes: s.votes })}
+          {json({ selected: s.selected, volumes: s.volumes, calibrated: s.calibrated, noteCounts: s.noteCounts })}
         </pre>
         <pre>{s.messages.map((m) => JSON.stringify(m.msg).slice(0, 90)).join('\n')}</pre>
       </div>

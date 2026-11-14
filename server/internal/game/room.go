@@ -56,7 +56,6 @@ type player struct {
 	notes      []protocol.Note // note-editor part; nil for grid-only phones and bots
 	noteCount  int
 	playing    bool
-	vote       int // round voted for, 0 = none
 
 	lastPattern time.Time // last pattern broadcast, for patternChanged
 }
@@ -77,11 +76,9 @@ type Room struct {
 	tvToken string
 	players map[int]*player // by seat
 
-	phase    string
-	deadline time.Time
-	timer    *time.Timer // fires at deadline; nil when the phase has none
-	// voteMinEnd: the vote doesn't end early before the TV's replays finish.
-	voteMinEnd time.Time
+	phase      string
+	deadline   time.Time
+	timer      *time.Timer // fires at deadline; nil when the phase has none
 	key        string
 	tempo      int
 	categories []string
@@ -94,12 +91,12 @@ type Room struct {
 	flushPending           bool // an evFlush is on its way
 
 	// The game: conductors in order (fixed at start), the round in
-	// progress, and finished performances.
+	// progress with its cue chart, and finished rounds' scores.
 	order        []int
 	round        int // 1-based; 0 in the lobby
 	keys         []keyTempo
-	cueLog       []protocol.LoggedCue
-	performances []protocol.Performance
+	targets      []protocol.Target
+	performances []protocol.PerformanceSummary
 	winner       int
 }
 
@@ -205,12 +202,9 @@ func (r *Room) onJoin(c Client, j protocol.Join) {
 		}
 		r.sendTo(c, protocol.Welcome{Envelope: r.env(protocol.TypeWelcome), Role: protocol.RoleTV, Token: r.tvToken})
 		r.log.Info("tv joined")
-		// Catch the TV up: state, the patterns, and replays if we're voting.
+		// Catch the TV up: state and the patterns.
 		r.broadcastState()
 		r.sendPatterns()
-		if r.phase == protocol.PhaseVote || r.phase == protocol.PhaseResults {
-			r.sendPerformances()
-		}
 
 	case protocol.RolePlayer:
 		if p := r.playerByToken(j.Token); p != nil {
@@ -295,9 +289,6 @@ func (r *Room) onLeave(c Client) {
 	p.client = nil
 	r.log.Info("player disconnected", "seat", p.seat, "name", p.name, "phase", r.phase)
 	r.broadcastState()
-	if r.phase == protocol.PhaseVote {
-		r.maybeEndVote()
-	}
 }
 
 // ---- outgoing ----
@@ -322,7 +313,8 @@ func (r *Room) state() protocol.State {
 		Categories:   append([]string{}, r.categories...),
 		Patterns:     map[int]protocol.Grid{},
 		Live:         map[int]int{},
-		Performances: []protocol.PerformanceSummary{},
+		Performances: append([]protocol.PerformanceSummary{}, r.performances...),
+		Targets:      append([]protocol.Target{}, r.targets...),
 		Players:      []protocol.PlayerState{},
 		Winner:       r.winner,
 	}
@@ -347,11 +339,8 @@ func (r *Room) state() protocol.State {
 		s.Players = append(s.Players, protocol.PlayerState{
 			Seat: p.seat, Name: p.name, Color: p.color, Instrument: p.instrument,
 			Connected: p.connected(), Bot: p.bot,
-			NoteCount: p.noteCount, Playing: p.playing, Voted: p.vote != 0,
+			NoteCount: p.noteCount, Playing: p.playing,
 		})
-	}
-	if r.phase == protocol.PhaseVote || r.phase == protocol.PhaseResults {
-		s.Performances = r.summaries()
 	}
 	return s
 }
@@ -380,13 +369,6 @@ func (r *Room) sendPatterns() {
 		Round:    r.round, Key: r.key, Tempo: r.tempo, Locked: r.locked,
 		Parts: r.currentParts(),
 	})
-}
-
-func (r *Room) sendPerformances() {
-	if r.tv == nil {
-		return
-	}
-	r.sendTo(r.tv, protocol.Performances{Envelope: r.env(protocol.TypePerformances), List: r.performances})
 }
 
 func (r *Room) broadcastAll(v any) {

@@ -3,6 +3,7 @@ import Stage from '../stage/Stage.jsx'
 import NoteLanes from '../stage/NoteLanes.jsx'
 import CountdownRing from './CountdownRing.jsx'
 import Icon from './Icon.jsx'
+import { seatPos, SEAT_R } from '../stage/layout.js'
 import './screens.css'
 
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '')
@@ -36,6 +37,8 @@ export default function Perform() {
   })
 
   const cuePlayer = lastCue && players.find((p) => p.seat === lastCue.seat)
+  const targets = game.targets || []
+  const score = targets.reduce((sum, t) => sum + t.points, 0)
 
   return (
     <Stage seats={seats} beam={selected} under={
@@ -51,6 +54,9 @@ export default function Perform() {
           <b style={{ color: conductor?.color }}>{conductor?.name}</b>&nbsp;is conducting
         </span>
         <span className="perf-spacer" />
+        <span className="chip perf-chip perf-score">
+          Score <b className="num">{score}</b>
+        </span>
         <span className="chip perf-chip">Key of {game.key}</span>
         <span className="chip perf-chip">{game.tempo} BPM</span>
         <span className="chip perf-chip perf-bar">
@@ -61,6 +67,18 @@ export default function Perform() {
         </span>
         <CountdownRing deadline={game.deadline} size={88} />
       </div>
+
+      {/* One popup per hit target; the animation fades it out and it stays hidden. */}
+      {targets
+        .filter((t) => t.grade === 'perfect' || t.grade === 'good')
+        .map((t) => {
+          const { x, y } = seatPos(t.seat)
+          return (
+            <div key={`${t.beat}-${t.seat}`} className={`perf-grade ${t.grade}`} style={{ left: x, top: y - SEAT_R - 24 }}>
+              {t.grade === 'perfect' ? 'Perfect!' : 'Good'} +{t.points}
+            </div>
+          )
+        })}
 
       {cuePlayer && (
         // Re-keyed per cue so the fade-in replays.

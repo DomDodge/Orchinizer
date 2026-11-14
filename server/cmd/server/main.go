@@ -22,8 +22,6 @@ func main() {
 	envSeconds(log, "COMPOSE_SECONDS", &t.Compose)
 	envSeconds(log, "CALIBRATE_SECONDS", &t.Calibrate)
 	envSeconds(log, "PERFORM_SECONDS", &t.Perform)
-	envSeconds(log, "VOTE_SECONDS", &t.Vote)
-	envSeconds(log, "REPLAY_SECONDS", &t.ReplayClip)
 	if v := os.Getenv("MAX_ROUNDS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			t.MaxRounds = n
@@ -31,7 +29,7 @@ func main() {
 			log.Warn("ignoring bad env var", "name", "MAX_ROUNDS", "value", v)
 		}
 	}
-	log.Info("timings", "maxRounds", t.MaxRounds, "compose", t.Compose, "calibrate", t.Calibrate, "perform", t.Perform, "vote", t.Vote)
+	log.Info("timings", "maxRounds", t.MaxRounds, "compose", t.Compose, "calibrate", t.Calibrate, "perform", t.Perform)
 	reg := game.NewRegistry(log, t)
 
 	mux := http.NewServeMux()

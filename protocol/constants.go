@@ -34,6 +34,17 @@ const (
 	MaxNotes     = 16 // notes per player
 )
 
+// Scoring. A cue on a Target's seat within PerfectWindowMs of its beat is
+// perfect, within GoodWindowMs good; a target nobody hits is a miss.
+// CueLatencyMs is subtracted first: the usual phone -> server -> TV delay.
+const (
+	PerfectPoints   = 100
+	GoodPoints      = 50
+	PerfectWindowMs = 150
+	GoodWindowMs    = 350
+	CueLatencyMs    = 100
+)
+
 // RoomCodeAlphabet: room codes are 4 letters from this set (no I or O).
 const RoomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 const RoomCodeLength = 4

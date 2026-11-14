@@ -4,7 +4,7 @@ import { Calibrate } from '../components/Calibration';
 import { Perform } from '../components/Conductor';
 import { Join } from '../components/Join';
 import { Lobby } from '../components/Lobby';
-import { HoldUp, Playing, Results, Vote } from '../components/Player';
+import { HoldUp, Playing, Results } from '../components/Player';
 import { H1, P, Screen } from '../components/ui';
 import { useNet } from '../net';
 
@@ -27,8 +27,6 @@ export default function Index() {
         return conducting ? <Calibrate key={state.round} state={state} /> : <HoldUp state={state} me={me} />;
       case 'perform':
         return conducting ? <Perform key={state.round} state={state} /> : <Playing state={state} me={me} />;
-      case 'vote':
-        return <Vote state={state} me={me} />;
       case 'results':
         return <Results state={state} />;
     }

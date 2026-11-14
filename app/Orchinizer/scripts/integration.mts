@@ -13,7 +13,7 @@ const source = ts.transpileModule(readFileSync(new URL('../src/net.ts', import.m
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
-test('phone lobby → token reconnect → two conductor rounds → voting → restart', { timeout: 120000 }, async () => {
+test('phone lobby → token reconnect → two conductor rounds → scores → restart', { timeout: 120000 }, async () => {
   const binary = join(mkdtempSync(join(tmpdir(), 'orchinizer-integration-')), 'server');
   execFileSync('go', ['build', '-o', binary, './cmd/server'], { cwd: new URL('../../../server/', import.meta.url) });
   const reserve = createServer(); reserve.listen(0, '127.0.0.1'); await once(reserve, 'listening');
@@ -72,7 +72,16 @@ test('phone lobby → token reconnect → two conductor rounds → voting → re
     host.api.send({ type: 'host_action', action: 'start' }); await host.wait(s => !!s.error);
     assert.equal(host.api.useNet().state.phase, 'lobby'); host.api.clearError();
     tv = new WebSocket(url); await once(tv, 'open');
-    tv.addEventListener('message', e => { const m = JSON.parse(String(e.data)); if (m.type === 'cue') tv!.send(JSON.stringify({ ...m, type: 'cue_scheduled', beat: 4 })); });
+    // The fake TV hears each cue right on the seat's next open target, so it scores perfect.
+    let tvState: any;
+    tv.addEventListener('message', e => {
+      const m = JSON.parse(String(e.data));
+      if (m.type === 'state') tvState = m;
+      if (m.type !== 'cue') return;
+      const t = tvState?.targets.find((t: any) => t.seat === m.seat && !t.grade);
+      const heard = t ? t.beat + (100 * tvState.tempo) / 60000 : 0;
+      tv!.send(JSON.stringify({ ...m, type: 'cue_scheduled', beat: 4, heard }));
+    });
     tv.send(JSON.stringify({ type: 'join', role: 'tv', room })); await host.wait(s => s.state.tvConnected);
     const next = () => tv!.send(JSON.stringify({ type: 'host_action', action: 'next' }));
     host.api.send({ type: 'host_action', action: 'start' });
@@ -93,11 +102,11 @@ test('phone lobby → token reconnect → two conductor rounds → voting → re
     next(); await guest.wait(s => s.state.phase === 'calibrate'); guest.api.send({ type: 'calibrated', angles: {} });
     await guest.wait(s => s.state.phase === 'perform');
     guest.api.send({ type: 'cue', id: 'in-2', seat: initial.seat, action: 'in' }); await host.wait(s => s.state.live[initial.seat] === 80);
-    next(); await host.wait(s => s.state.phase === 'vote'); await guest.wait(s => s.state.phase === 'vote');
-    assert.equal(host.api.useNet().state.performances.length, 2);
-    host.api.send({ type: 'vote', round: 2 }); guest.api.send({ type: 'vote', round: 1 });
-    // The TV replays both performances before the server closes voting (25 seconds).
-    await host.wait(s => s.state.phase === 'results', 35000); assert.equal(host.api.useNet().state.winner, 1);
+    next(); await host.wait(s => s.state.phase === 'results'); await guest.wait(s => s.state.phase === 'results');
+    const [r1, r2] = host.api.useNet().state.performances;
+    assert.ok(r1.perfect >= 1 && r1.score === r1.perfect * 100 + r1.good * 50, JSON.stringify(r1));
+    assert.ok(r2.perfect >= 1, JSON.stringify(r2));
+    assert.equal(host.api.useNet().state.winner, r1.score >= r2.score ? 1 : 2);
     host.api.send({ type: 'host_action', action: 'restart' }); await host.wait(s => s.state.phase === 'lobby' && s.state.players.length === 2);
     const online = phone('Online', room); await online.wait(s => !!s.state);
     host.api.send({ type: 'kick', seat: online.api.useNet().seat }); await online.wait(s => !s.state && s.error === 'You were removed from the room');

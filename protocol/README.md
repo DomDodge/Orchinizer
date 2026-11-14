@@ -2,7 +2,7 @@
 
 **This folder is shared. Get the team's agreement before changing anything in it, and announce every change in the group chat.**
 
-The phone/backend integration adds lobby controls and state fields below. The TV UI remains a separate project; its existing join, pattern, cue, volume, bar, and replay messages are preserved.
+The phone/backend integration adds lobby controls and state fields below. The TV UI remains a separate project; its existing join, pattern, cue, volume, and bar messages are preserved.
 
 - `messages.ts` holds the TypeScript types for the app and the TV.
 - `messages.go` and `constants.go` hold the Go structs and constants for the server, mirroring `messages.ts` field for field.
@@ -45,7 +45,7 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 | `join` | any → server | `role` (`tv`/`player`), `name`, `token?`. A TV or named player that sends no `room` creates a room |
 | `welcome` | server → joiner | `role`, `seat`, `color`, `token`; for players also `instrument`, `steps` and `notes?` |
 | `error` | server → one client | `code`, `message`. Codes: `bad_message`, `room_not_found`, `room_full`, `game_in_progress`, `not_allowed`, `bad_pattern` |
-| `state` | server → all | full state: `phase`, `round`, `totalRounds`, `host`, `conductor`, `tvConnected`, `categories`, `deadline`, `serverTime`, `key`, `scale`, `tempo`, `instruments`, `players[]`, `patterns`, `live`, `performances`, `winner` |
+| `state` | server → all | full state: `phase`, `round`, `totalRounds`, `host`, `conductor`, `tvConnected`, `categories`, `deadline`, `serverTime`, `key`, `scale`, `tempo`, `instruments`, `players[]`, `patterns`, `live`, `performances`, `winner`, `targets` |
 | `categories` | host phone → server | `categories: string[]`; lobby only, at least one section; clears disabled picks |
 | `pick` | player → server | `instrument: string \| null`; lobby only, enabled and unique; `null` unpicks |
 | `leave` | player → server | lobby only; removes the seat and frees the pick; host passes to the next human in join order |
@@ -57,30 +57,28 @@ The phone/backend integration adds lobby controls and state fields below. The TV
 | `select` | conductor → server → tv | `seat`. Max 10/s: the server drops anything faster |
 | `cue` | conductor → server → tv | `id`, `seat`, `action` (`in`/`out`/`all_out`); `all_out` with seat 0 expands to individual `out` cues for the TV |
 | `volume` | conductor → server → tv | `seat`, `level` 0–100. Max 10/s: the server drops anything faster, so keep sending at a steady rate while the volume changes, so the final value gets through |
-| `cue_scheduled` | tv → server | `id`, `seat`, `action`, `beat`: the beat it actually played on. Beat 0 is when the transport starts for perform. This is what the replay log stores, and it sets `players[].playing` |
+| `cue_scheduled` | tv → server | `id`, `seat`, `action`, `beat`: the beat it actually played on, and `heard`: the exact fractional beat the cue reached the TV (before rounding up), which the server scores. Beat 0 is when the transport starts for perform. It sets `players[].playing` |
 | `bar` | tv → server → players | `bar`, `tempo`. Sent once per bar so phones can pulse on the beat |
-| `vote` | player → server | `round`. You can't vote for a round you conducted |
-| `host_action` | tv or host phone → server | `action`: `start`, `next` (end the current phase now), `skip` (skip the remaining rounds and go to the vote), `restart` (back to the lobby) |
-| `performances` | server → tv | `list[]`: round, conductor, key, tempo, parts, cue log. Sent when the vote starts, for replays |
+| `host_action` | tv or host phone → server | `action`: `start`, `next` (end the current phase now), `skip` (skip the remaining rounds and go to the results), `restart` (back to the lobby) |
 
 ### Who can send what
 - The server takes `calibrated`, `select`, `cue` and `volume` only from the seat named in `state.conductor`. Each phone picks its mode from that field.
 - `cue_scheduled` and `bar` are accepted from the TV only. The host phone may send `host_action: start` and `restart`; `next` and `skip` remain TV-only.
 - Lobby actions are locked during a game. `pattern.instrument` cannot bypass pick uniqueness or change an instrument after Start.
 - `state.host` is the first human in join order, including an offline host until they explicitly leave. In the lobby, `state.conductor` equals `host`.
-- `state.patterns` maps seats to grids for restoring composition after reconnects. `state.live` maps currently playing seats to volume 0–100. Playing status changes only after a matching TV `cue_scheduled`, counted once. `performances` is always an array; summaries include key and tempo.
+- `state.patterns` maps seats to grids for restoring composition after reconnects. `state.live` maps currently playing seats to volume 0–100. Playing status changes only after a matching TV `cue_scheduled`, counted once. `performances` is always an array of finished rounds with key, tempo, `score`, `perfect`, `good` and `miss`. `targets` is the cue chart while performing, otherwise empty.
 
 ## Game flow
 
-`lobby` → for each round: `compose` (180 s) → `calibrate` (ends when `calibrated` arrives, 30 s cap) → `perform` (45 s) → … → `vote` (30 s) → `results`
+`lobby` → for each round: `compose` (180 s) → `calibrate` (ends when `calibrated` arrives, 30 s cap) → `perform` (45 s) → … → `results`
 
-- **Start** (`host_action: start`): requires an attached TV and a selected instrument for every connected human. Seats still disconnected are removed, and bots fill up to 4 seats. The conductor order is every real player in join order, so there's one round per player. Bots never conduct or vote.
+- **Start** (`host_action: start`): requires an attached TV and a selected instrument for every connected human. Seats still disconnected are removed, and bots fill up to 4 seats. The conductor order is every real player in join order, so there's one round per player. Bots never conduct.
 - **Each round:** a new `key` and `tempo`. Human instrument picks are restored; bots take unused instruments among the enabled sections. The conductor's `instrument` is `""`, and they sit compose out. Phones should show the "You're conducting!" screen when `state.conductor` matches their seat.
 - **Compose:** patterns are accepted in the lobby (for testing) and during compose. When compose ends they lock, and an empty pattern gets a default. The TV then gets `patterns` with `locked: true`.
 - **Calibrate:** the conductor may send `select` and `calibrated`. `calibrated` starts perform right away.
-- **Perform:** the conductor may send `select`, `cue` and `volume`. The TV's `cue_scheduled` messages make up the replay log.
+- **Perform:** the conductor may send `select`, `cue` and `volume`. When perform starts, the server fills `state.targets`, the cue chart: one `{beat, seat}` prompt every 4 beats after a 2-bar lead-in, ending a bar before perform ends, never the same seat twice in a row. The TV draws each prompt falling down its seat's lane, landing on its beat.
+- **Scoring:** for each matched `cue_scheduled`, the server takes `heard`, subtracts `CueLatencyMs` (100), and compares it with the closest ungraded target on that seat. The cue's action doesn't matter: a cue toggles the seat. Within ±`PerfectWindowMs` (150) it is `perfect` for `PerfectPoints` (100). Within ±`GoodWindowMs` (350) it is `good` for `GoodPoints` (50). Otherwise it scores nothing. Each target is graded once, and `state` is broadcast with the target's `grade` and `points`. Targets still ungraded when perform ends are `miss`, and the round's summary is added to `performances`. Only the conductor scores.
 - **A conductor who is disconnected when their round starts is skipped.**
-- **Vote:** the TV gets `performances` (everything needed for replays). You can't vote for a round you conducted. You can change your vote; the last one counts. The vote ends early once everyone eligible has voted. `state.performances` holds the live counts. The vote lasts at least one replay clip per performance plus 5 s (10 s clips by default), and everyone voting early pulls the deadline in to the end of the replays instead of cutting them off.
-- **Results:** `state.winner` is the winning round, and a tie goes to the earlier round. The game stays here until `next` or `restart`, which go back to the lobby with the same players.
-- **Host actions:** `next` ends the current phase now. `skip` jumps to the vote, keeping the performance in progress (with no performances it goes back to the lobby). `restart` goes back to the lobby from anywhere.
+- **Results:** `state.winner` is the round with the top score, and a tie goes to the earlier round. The game stays here until `next` or `restart`, which go back to the lobby with the same players.
+- **Host actions:** `next` ends the current phase now. `skip` jumps to the results, scoring the performance in progress (with no performances it goes back to the lobby). `restart` goes back to the lobby from anywhere.
 - **Stale conductor messages:** `select` and `volume` from a non-conductor, or in the wrong phase, are dropped silently, because they stream and some always arrive just after a phase change. `cue` and `calibrated` get an `error`.

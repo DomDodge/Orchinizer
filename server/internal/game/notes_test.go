@@ -113,7 +113,7 @@ func TestNotesFlowThroughTheGame(t *testing.T) {
 		t.Fatalf("welcome after reconnect: %+v", w)
 	}
 
-	// Calibrate locks the parts; the notes survive into the performance log.
+	// Calibrate locks the parts.
 	host(r, tv, protocol.HostNext)
 	if s := tv.state(t); s.Phase != protocol.PhaseCalibrate {
 		t.Fatalf("want calibrate, got %s", s.Phase)
@@ -126,11 +126,6 @@ func TestNotesFlowThroughTheGame(t *testing.T) {
 	host(r, tv, protocol.HostNext) // round 2 compose (Bob conducts)
 	if len(r.performances) != 1 {
 		t.Fatalf("want 1 performance, got %d", len(r.performances))
-	}
-	for _, p := range r.performances[0].Parts {
-		if p.Seat == 2 && len(p.Notes) != 2 {
-			t.Fatalf("performance lost bob's notes: %+v", p)
-		}
 	}
 	// A new round starts everyone's part empty.
 	if r.players[2].notes != nil || r.players[2].noteCount != 0 {

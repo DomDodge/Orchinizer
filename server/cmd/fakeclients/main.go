@@ -9,7 +9,7 @@
 //
 // Each fake player sends a random pattern when it joins and on every
 // compose, tweaks it a few times, conducts when state.conductor is its seat
-// (or, while no conductor is set, if it's the -conduct player), and votes.
+// (or, while no conductor is set, if it's the -conduct player).
 package main
 
 import (
@@ -176,13 +176,12 @@ func (b *bot) session(ctx context.Context) error {
 	}
 }
 
-// act reacts to state changes: compose, conduct, vote.
+// act reacts to state changes: compose and conduct.
 func (b *bot) act(ctx context.Context, c *conn, states <-chan protocol.State) {
 	var cancelConduct context.CancelFunc = func() {}
 	var cancelCompose context.CancelFunc = func() {}
 	defer func() { cancelConduct(); cancelCompose() }()
 	lastPhase, lastRound, conducting, sentPattern := "", -1, false, false
-	voted := map[int]bool{}
 
 	for {
 		var s protocol.State
@@ -241,23 +240,6 @@ func (b *bot) act(ctx context.Context, c *conn, states <-chan protocol.State) {
 		} else if !shouldConduct && conducting {
 			conducting = false
 			cancelConduct()
-		}
-
-		// Vote once for a random round we didn't conduct.
-		if s.Phase == protocol.PhaseVote && !voted[s.Round] {
-			var options []int
-			for _, p := range s.Performances {
-				if p.ConductorSeat != b.seat {
-					options = append(options, p.Round)
-				}
-			}
-			if len(options) > 0 {
-				voted[s.Round] = true
-				go func(r int) {
-					sleep(ctx, time.Duration(1000+rand.IntN(5000))*time.Millisecond)
-					c.send(protocol.Vote{Envelope: env(protocol.TypeVote, b.room), Round: r})
-				}(options[rand.IntN(len(options))])
-			}
 		}
 	}
 }

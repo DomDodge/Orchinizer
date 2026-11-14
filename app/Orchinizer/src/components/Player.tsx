@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { send, useSecondsLeft, useNet } from '../net';
 import { instrumentInfo, type Player, type State } from '../protocol';
 import { BeatRing } from './Pulse';
@@ -56,47 +56,37 @@ export function Playing({ state, me }: { state: State; me: Player }) {
   );
 }
 
-export function Vote({ state, me }: { state: State; me: Player }) {
-  const left = useSecondsLeft(state.deadline);
-  const [mine, setMine] = useState(0);
-  return (
-    <Screen>
-      <H1>🗳️ Best performance?</H1>
-      <Timer left={left} />
-      {state.performances.map((pf) => {
-        const own = pf.conductorSeat === me.seat;
-        const color = state.players.find((p) => p.seat === pf.conductorSeat)?.color ?? FG;
-        return (
-          <Pressable
-            key={pf.round}
-            disabled={own}
-            onPress={() => {
-              setMine(pf.round);
-              send({ type: 'vote', round: pf.round });
-              Haptics.selectionAsync();
-            }}
-            style={[styles.vote, { borderColor: color, backgroundColor: mine === pf.round ? color : 'transparent', opacity: own ? 0.35 : 1 }]}
-          >
-            <Text style={[styles.voteName, { color: mine === pf.round ? BG : color }]}>{pf.conductorName}</Text>
-            <Text style={{ color: mine === pf.round ? BG : DIM }}>
-              Round {pf.round} · key of {pf.key} · {own ? 'yours' : `${pf.votes} votes`}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </Screen>
-  );
-}
-
+/** Results: the winner and every conductor's score, top score first. */
 export function Results({ state }: { state: State }) {
   const { seat } = useNet();
-  const win = state.performances.find((p) => p.round === state.winner);
-  const color = state.players.find((p) => p.seat === win?.conductorSeat)?.color ?? FG;
+  // The server's `winner` (a round number) wins any tie.
+  const ranked = [...state.performances].sort(
+    (a, b) => b.score - a.score || Number(b.round === state.winner) - Number(a.round === state.winner) || a.round - b.round,
+  );
+  const win = ranked[0];
+  const colorOf = (s?: number) => state.players.find((p) => p.seat === s)?.color ?? FG;
   return (
     <Screen style={{ justifyContent: 'center' }}>
       <Text style={styles.crown}>👑</Text>
-      <H1 color={color}>{win ? `${win.conductorName} wins!` : 'Show’s over'}</H1>
-      {win && <P>{win.votes} votes · watch the TV for the replay</P>}
+      <H1 color={colorOf(win?.conductorSeat)}>{win ? `${win.conductorName} wins!` : 'Show’s over'}</H1>
+      <ScrollView contentContainerStyle={{ gap: 10 }} style={{ flexGrow: 0 }}>
+        {ranked.map((pf, i) => {
+          const color = colorOf(pf.conductorSeat);
+          return (
+            <View key={pf.round} style={[styles.row, { borderColor: color, backgroundColor: pf.conductorSeat === seat ? color + '33' : 'transparent' }]}>
+              <View style={styles.rowTop}>
+                <Text style={[styles.rowName, { color }]}>
+                  {i + 1}. {pf.conductorName}
+                </Text>
+                <Text style={styles.rowScore}>{pf.score}</Text>
+              </View>
+              <Text style={{ color: DIM }}>
+                {pf.perfect} perfect · {pf.good} good · {pf.miss} miss
+              </Text>
+            </View>
+          );
+        })}
+      </ScrollView>
       {state.host === seat && <Btn label="Back to lobby" onPress={() => send({ type: 'host_action', action: 'restart' })} />}
     </Screen>
   );
@@ -104,7 +94,9 @@ export function Results({ state }: { state: State }) {
 
 const styles = StyleSheet.create({
   seat: { fontSize: 160, fontWeight: '900' },
-  vote: { borderWidth: 3, borderRadius: 18, padding: 18, gap: 4 },
-  voteName: { fontSize: 24, fontWeight: '900' },
+  row: { borderWidth: 3, borderRadius: 18, padding: 16, gap: 4 },
+  rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  rowName: { fontSize: 22, fontWeight: '900', flexShrink: 1 },
+  rowScore: { fontSize: 28, fontWeight: '900', color: FG },
   crown: { fontSize: 120, textAlign: 'center' },
 });

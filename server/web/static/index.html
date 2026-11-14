@@ -32,7 +32,7 @@
   <div class="row">
     <button data-host="start" class="primary">Start</button>
     <button data-host="next">Next phase</button>
-    <button data-host="skip">Skip to vote</button>
+    <button data-host="skip">Skip to results</button>
     <button data-host="restart">Restart</button>
   </div>
   <div id="summary"></div>
@@ -84,13 +84,14 @@
     const left = s.deadline ? Math.max(0, Math.round((s.deadline - (Date.now() + offset)) / 1000)) + "s" : "";
     let text = `<b>${s.phase}</b>` + (s.round ? ` · round ${s.round}/${s.totalRounds}` : "") +
       (s.conductor ? ` · conductor seat ${s.conductor}` : "") + ` · ${s.key} major pentatonic · ${s.tempo} BPM` + (left ? ` · ${left}` : "");
-    if (s.performances) text += "<br>Votes: " + s.performances.map(p => `round ${p.round} (${p.conductorName}): ${p.votes}`).join(", ");
+    if (s.targets?.length) text += "<br>This round: " + s.targets.reduce((n, t) => n + t.points, 0) + " pts, " + s.targets.filter(t => t.grade).length + "/" + s.targets.length + " cues hit";
+    if (s.performances?.length) text += "<br>Scores: " + s.performances.map(p => `round ${p.round} (${esc(p.conductorName)}): ${p.score}`).join(", ");
     if (s.winner) text += `<br><b>Winner: round ${s.winner}</b>`;
     $("summary").innerHTML = text;
     $("players").innerHTML = s.players.map(p => `<tr>
       <td><span class="dot" style="background:${p.color}"></span> ${p.seat}</td>
       <td>${esc(p.name)}${p.bot ? " (bot)" : ""}</td><td>${p.instrument || (p.seat === s.conductor ? "conducting" : "")}</td>
-      <td>${p.noteCount}</td><td>${p.connected ? "" : "disconnected "}${p.playing ? "▶ playing " : ""}${p.voted ? "voted" : ""}</td></tr>`).join("");
+      <td>${p.noteCount}</td><td>${p.connected ? "" : "disconnected "}${p.playing ? "▶ playing" : ""}</td></tr>`).join("");
   }
   setInterval(() => state && render(), 1000);
   function esc(s) { return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }

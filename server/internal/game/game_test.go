@@ -5,7 +5,6 @@ import (
 	"io"
 	"log/slog"
 	"testing"
-	"time"
 
 	"orchinizer/protocol"
 )
@@ -52,9 +51,7 @@ func (f *fakeClient) lastError() string {
 // The room is driven synchronously: handle() and onDeadline() run on the
 // test goroutine, the same way run() would call them.
 func newTestRoom() *Room {
-	t := DefaultTimings
-	t.ReplayClip = 0 // most tests check that the vote ends as soon as everyone votes
-	return newRoom("TEST", nil, slog.New(slog.NewTextHandler(io.Discard, nil)), t)
+	return newRoom("TEST", nil, slog.New(slog.NewTextHandler(io.Discard, nil)), DefaultTimings)
 }
 
 func send(r *Room, c Client, v any) {
@@ -173,6 +170,19 @@ func TestFullGame(t *testing.T) {
 		t.Fatal("non-conductor cue accepted")
 	}
 
+	// Scoring: a cue heard on a target's beat (plus the usual latency) is perfect.
+	s = tv.state(t)
+	if len(s.Targets) == 0 || s.Targets[0].Beat != chartLeadIn || s.Targets[0].Seat == 1 {
+		t.Fatalf("targets: %+v", s.Targets)
+	}
+	tg, nTargets := s.Targets[0], len(s.Targets)
+	send(r, ada, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "c3", Seat: tg.Seat, Action: "in"})
+	heard := float64(tg.Beat) + protocol.CueLatencyMs*float64(s.Tempo)/60000
+	send(r, tv, protocol.CueScheduled{Envelope: protocol.Envelope{Type: protocol.TypeCueScheduled}, ID: "c3", Seat: tg.Seat, Action: "in", Beat: tg.Beat + 1, Heard: heard})
+	if g := tv.state(t).Targets[0]; g.Grade != protocol.GradePerfect || g.Points != protocol.PerfectPoints {
+		t.Fatalf("target after a perfect cue: %+v", g)
+	}
+
 	// Perform ends -> round 2, Bob conducts, key may change, playing resets.
 	r.onDeadline()
 	s = tv.state(t)
@@ -188,35 +198,18 @@ func TestFullGame(t *testing.T) {
 	if tv.state(t).Phase != protocol.PhasePerform {
 		t.Fatal("calibrate timeout didn't start perform")
 	}
-	r.onDeadline() // perform -> vote (every player has conducted)
+	r.onDeadline() // perform -> results (every player has conducted)
 
 	s = tv.state(t)
-	if s.Phase != protocol.PhaseVote || len(s.Performances) != 2 {
-		t.Fatalf("vote: %+v", s)
-	}
-	var perfs protocol.Performances
-	if !tv.last(protocol.TypePerformances, &perfs) || len(perfs.List) != 2 {
-		t.Fatalf("tv performances: %+v", perfs)
-	}
-	if len(perfs.List[0].Cues) != 1 || perfs.List[0].Cues[0].Beat != 4 || perfs.List[0].ConductorName != "Ada" {
-		t.Fatalf("round 1 replay log: %+v", perfs.List[0])
-	}
-
-	// Can't vote for your own performance; voting for the other one works,
-	// and the vote ends as soon as everyone has voted.
-	send(r, ada, protocol.Vote{Envelope: protocol.Envelope{Type: protocol.TypeVote}, Round: 1})
-	if ada.lastError() == "" {
-		t.Fatal("voted for own performance")
-	}
-	send(r, ada, protocol.Vote{Envelope: protocol.Envelope{Type: protocol.TypeVote}, Round: 2})
-	if tv.state(t).Phase != protocol.PhaseVote {
-		t.Fatal("vote ended before bob voted")
-	}
-	send(r, bob, protocol.Vote{Envelope: protocol.Envelope{Type: protocol.TypeVote}, Round: 1})
-	s = tv.state(t)
-	// 1 vote each: the tie goes to the earlier round.
-	if s.Phase != protocol.PhaseResults || s.Winner != 1 {
+	if s.Phase != protocol.PhaseResults || len(s.Performances) != 2 || len(s.Targets) != 0 {
 		t.Fatalf("results: %+v", s)
+	}
+	p1, p2 := s.Performances[0], s.Performances[1]
+	if p1.ConductorName != "Ada" || p1.Score != protocol.PerfectPoints || p1.Perfect != 1 || p1.Miss != nTargets-1 {
+		t.Fatalf("round 1 score: %+v", p1)
+	}
+	if p2.Score != 0 || p2.Perfect+p2.Good != 0 || s.Winner != 1 {
+		t.Fatalf("round 2 score / winner: %+v winner %d", p2, s.Winner)
 	}
 
 	// next from results -> lobby, bots removed, humans kept.
@@ -246,20 +239,14 @@ func TestDisconnectedConductorIsSkippedAndStartDropsLeavers(t *testing.T) {
 			t.Fatal("C still seated")
 		}
 	}
-	// B drops mid-game; when round 2 comes, B's round is skipped -> vote.
+	// B drops mid-game; when round 2 comes, B's round is skipped -> results.
 	r.handle(event{kind: evLeave, client: b})
 	r.onDeadline() // compose -> calibrate
 	r.onDeadline() // calibrate -> perform
-	r.onDeadline() // perform -> (B skipped) -> vote
-	// A conducted the only performance and B is gone: nobody can vote, so
-	// the vote ends at once and results follow.
+	r.onDeadline() // perform -> (B skipped) -> results
 	s = tv.state(t)
 	if s.Phase != protocol.PhaseResults || len(s.Performances) != 1 || s.Winner != 1 {
 		t.Fatalf("expected results with 1 performance: %+v", s)
-	}
-	var perfs protocol.Performances
-	if !tv.last(protocol.TypePerformances, &perfs) || len(perfs.List) != 1 {
-		t.Fatal("tv didn't get performances")
 	}
 }
 
@@ -274,7 +261,7 @@ func TestSkipAndRestart(t *testing.T) {
 	r.onDeadline() // calibrate -> perform
 	host(r, tv, protocol.HostSkip)
 	s := tv.state(t)
-	if s.Phase != protocol.PhaseVote || len(s.Performances) != 1 {
+	if s.Phase != protocol.PhaseResults || len(s.Performances) != 1 {
 		t.Fatalf("skip during perform: %+v", s)
 	}
 	host(r, tv, protocol.HostRestart)
@@ -347,34 +334,53 @@ func TestSelectRateLimit(t *testing.T) {
 	}
 }
 
-// With replays on, everyone voting early pulls the deadline in to the end of
-// the replays instead of cutting them off.
-func TestVoteWaitsForReplays(t *testing.T) {
+func TestScoreCueWindows(t *testing.T) {
 	r := newTestRoom()
-	r.timings.ReplayClip = 10 * time.Second
-	r.timings.Vote = 5 * time.Second
-	tv := joinTV(r)
-	a, b := joinPlayer(r, "A"), joinPlayer(r, "B")
-	host(r, tv, protocol.HostStart)
-	for range 6 { // 2 rounds: compose, calibrate, perform each
-		r.onDeadline()
+	r.tempo = 100 // 600 ms per beat
+	at := func(ms float64) float64 { return 8 + (ms+protocol.CueLatencyMs)/600 }
+	cases := []struct {
+		seat  int
+		heard float64
+		grade string
+	}{
+		{2, at(0), protocol.GradePerfect},
+		{2, at(-140), protocol.GradePerfect},
+		{2, at(200), protocol.GradeGood},
+		{2, at(-340), protocol.GradeGood},
+		{2, at(400), ""},   // too late
+		{3, at(0), ""},     // wrong seat
+		{2, at(-1000), ""}, // way early
 	}
-	s := tv.state(t)
-	if s.Phase != protocol.PhaseVote {
-		t.Fatalf("phase %s", s.Phase)
+	for _, c := range cases {
+		r.targets = []protocol.Target{{Beat: 8, Seat: 2}}
+		r.scoreCue(c.seat, c.heard)
+		if g := r.targets[0].Grade; g != c.grade {
+			t.Errorf("seat %d heard %.3f: grade %q, want %q", c.seat, c.heard, g, c.grade)
+		}
 	}
-	// 2 replays x 10 s + 5 s pad = 25 s, longer than the 5 s vote.
-	if left := time.Until(time.UnixMilli(s.Deadline)); left < 24*time.Second || left > 26*time.Second {
-		t.Fatalf("vote deadline in %v, want ~25s", left)
+	// A graded target isn't graded again; the next one on the seat is used.
+	r.targets = []protocol.Target{{Beat: 8, Seat: 2, Grade: protocol.GradeGood, Points: protocol.GoodPoints}, {Beat: 9, Seat: 2}}
+	r.scoreCue(2, at(0)+1)
+	if r.targets[0].Points != protocol.GoodPoints || r.targets[1].Grade != protocol.GradePerfect {
+		t.Fatalf("regraded: %+v", r.targets)
 	}
-	send(r, a, protocol.Vote{Envelope: protocol.Envelope{Type: protocol.TypeVote}, Round: 2})
-	send(r, b, protocol.Vote{Envelope: protocol.Envelope{Type: protocol.TypeVote}, Round: 1})
-	if tv.state(t).Phase != protocol.PhaseVote {
-		t.Fatal("vote ended before the replays finished")
+}
+
+func TestChart(t *testing.T) {
+	r := newTestRoom()
+	r.tempo, r.conductor = 120, 1
+	for seat := 1; seat <= 4; seat++ {
+		r.players[seat] = &player{seat: seat, joined: seat}
 	}
-	r.onDeadline()
-	if tv.state(t).Phase != protocol.PhaseResults {
-		t.Fatal("no results after the replays")
+	ts := r.chart()
+	// 45 s at 120 BPM = 90 beats; prompts on 8, 12, ... 84.
+	if len(ts) != 20 || ts[0].Beat != 8 || ts[len(ts)-1].Beat != 84 {
+		t.Fatalf("chart beats: %+v", ts)
+	}
+	for i, tg := range ts {
+		if tg.Seat == 1 || tg.Seat < 1 || tg.Seat > 4 || (i > 0 && tg.Seat == ts[i-1].Seat) {
+			t.Fatalf("bad seat at %d: %+v", i, ts)
+		}
 	}
 }
 
@@ -398,7 +404,7 @@ func TestMaxRounds(t *testing.T) {
 	for range 3 {
 		r.onDeadline()
 	}
-	if s := tv.state(t); s.Phase != protocol.PhaseVote || len(s.Performances) != 2 {
-		t.Fatalf("expected the vote after 2 rounds: %+v", s.Phase)
+	if s := tv.state(t); s.Phase != protocol.PhaseResults || len(s.Performances) != 2 {
+		t.Fatalf("expected results after 2 rounds: %+v", s.Phase)
 	}
 }

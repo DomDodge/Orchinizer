@@ -52,6 +52,17 @@ export function Perform({ state }: { state: State }) {
     });
   }, [buttons, directions]);
 
+  // Score: the server grades each cue against the cue chart the TV shows.
+  const targets = state.targets ?? [];
+  const score = targets.reduce((sum, t) => sum + t.points, 0);
+  const hits = targets.filter((t) => t.grade === 'perfect' || t.grade === 'good');
+  const lastHit = hits.reduce<(typeof hits)[number] | undefined>((a, t) => (!a || t.beat > a.beat ? t : a), undefined);
+  const seenHits = useRef(hits.length);
+  useEffect(() => {
+    if (hits.length > seenHits.current) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    seenHits.current = hits.length;
+  }, [hits.length]);
+
   const players = band(state);
   const p = players.find((x) => x.seat === selected);
   const isLive = (x: Player) => state.live[x.seat] != null;
@@ -61,6 +72,7 @@ export function Perform({ state }: { state: State }) {
       {/* Long-press the header for the hidden fallback: on-screen cue buttons. */}
       <Pressable onLongPress={() => setButtons(!buttons)} style={styles.header}>
         <Text style={styles.headerText}>🎼 Conducting</Text>
+        <Text style={styles.score}>{score} pts</Text>
         <Timer left={left} />
       </Pressable>
 
@@ -103,7 +115,12 @@ export function Perform({ state }: { state: State }) {
           </View>
         ))}
       </View>
-      {!buttons && <P>Flick to cue in/out · tilt for volume · point down and hold to stop all</P>}
+      {lastHit && (
+        <Text key={lastHit.beat} style={[styles.grade, { color: lastHit.grade === 'perfect' ? '#F2C14E' : FG }]}>
+          {lastHit.grade === 'perfect' ? 'Perfect!' : 'Good'} +{lastHit.points}
+        </Text>
+      )}
+      {!buttons && <P>Cue each seat as its gold bar lands on the TV · flick to cue in/out · tilt for volume · point down and hold to stop all</P>}
     </Screen>
   );
 }
@@ -112,6 +129,8 @@ const styles = StyleSheet.create({
   huge: { fontSize: 140, fontWeight: '900', textAlign: 'center', color: FG },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   headerText: { color: FG, fontSize: 22, fontWeight: '900' },
+  score: { color: '#F2C14E', fontSize: 22, fontWeight: '900' },
+  grade: { fontSize: 28, fontWeight: '900', textAlign: 'center' },
   stage: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   buttons: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignContent: 'center' },
   cueBtn: { width: '47%', aspectRatio: 1.2, borderWidth: 4, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },

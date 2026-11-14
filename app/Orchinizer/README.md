@@ -1,6 +1,6 @@
 # Orchinizer phone frontend
 
-Expo SDK 58 / React Native screens for players and conductors: host/join, lobby and instrument selection, compose, calibration, performance, voting, and results. Includes motion controls, haptics, and the audio assets used for note previews.
+Expo SDK 58 / React Native screens for players and conductors: host/join, lobby and instrument selection, compose, calibration, performance with scoring, and results. Includes motion controls, haptics, and the audio assets used for note previews.
 
 Run from `app/Orchinizer/`:
 
@@ -17,7 +17,7 @@ The phone imports the shared TypeScript contract from `../../protocol/messages.t
 2. The host enables sections. Everyone chooses a unique instrument, including the host for later rounds.
 3. Connect the TV client to that room (`join` with `role: "tv"` and the room code). The TV owns audio scheduling; its UI is maintained separately.
 4. Once the TV is attached and everyone has picked, tap **Start game** on the host phone. Bots fill up to four seats for small test groups.
-5. Compose, calibrate, perform, and vote. The host can tap **Back to lobby** after results.
+5. Compose, calibrate and perform: the conductor scores points by cueing each seat as its prompt lands on the TV. The host can tap **Back to lobby** after results.
 
 During calibration, stay in one spot and point at the named player, then tap **Save direction**. Tap a saved player to redo their direction. After everyone is recorded, sweep the room to check the names and tap **Start performing**. Virtual players need separate imagined spots. Choose **Start with buttons** if motion is unavailable; if the setup timer expires before confirmation, performing also uses button controls.
 

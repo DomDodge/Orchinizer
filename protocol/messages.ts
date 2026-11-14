@@ -2,7 +2,7 @@
 // Change both together and announce it in the group chat.
 
 export type Role = "tv" | "player";
-export type Phase = "lobby" | "compose" | "calibrate" | "perform" | "vote" | "results";
+export type Phase = "lobby" | "compose" | "calibrate" | "perform" | "results";
 export type CueAction = "in" | "out";
 export type HostActionKind = "start" | "next" | "skip" | "restart";
 export type ErrorCode =
@@ -62,7 +62,6 @@ export interface PlayerState {
   bot: boolean;
   noteCount: number;
   playing: boolean;
-  voted: boolean;
 }
 
 export interface PerformanceSummary {
@@ -71,7 +70,10 @@ export interface PerformanceSummary {
   conductorName: string;
   key: string;
   tempo: number;
-  votes: number;
+  score: number;
+  perfect: number;
+  good: number;
+  miss: number;
 }
 
 /** Full game state, broadcast on every change. */
@@ -92,6 +94,7 @@ export interface State extends Base {
   tempo: number; // BPM
   instruments: string[];
   players: PlayerState[];
+  /** Finished rounds, in round order. */
   performances: PerformanceSummary[];
   host: number;
   tvConnected: boolean;
@@ -100,7 +103,22 @@ export interface State extends Base {
   /** Note-editor parts by seat. Seats without notes are left out. */
   notes?: Record<string, Note[]>;
   live: Record<string, number>;
-  winner: number; // winning round, 0 = none
+  winner: number; // round with the top score (ties go to the earlier round), 0 = none
+  /** This round's cue chart while performing, else empty. */
+  targets: Target[];
+}
+
+export type Grade = "perfect" | "good" | "miss";
+
+/**
+ * One prompt in the cue chart: cue `seat` (in or out, whichever toggles it) on `beat`.
+ * Beat 0 = transport start for perform. `grade` is "" until hit or perform ends.
+ */
+export interface Target {
+  beat: number;
+  seat: number;
+  grade: Grade | "";
+  points: number;
 }
 
 /** A phone using the note editor sends notes; the grid sequencer sends steps. Each message replaces the whole part. */
@@ -160,6 +178,8 @@ export interface CueScheduled extends Base {
   seat: number;
   action: CueAction;
   beat: number;
+  /** The exact (fractional) beat the cue reached the TV, before moving to the next beat. Used for scoring. */
+  heard: number;
 }
 
 export interface Bar extends Base {
@@ -168,37 +188,9 @@ export interface Bar extends Base {
   tempo: number;
 }
 
-export interface Vote extends Base {
-  type: "vote";
-  round: number;
-}
-
 export interface HostAction extends Base {
   type: "host_action";
   action: HostActionKind;
-}
-
-export interface LoggedCue {
-  id: string;
-  seat: number;
-  action: CueAction;
-  beat: number;
-}
-
-export interface Performance {
-  round: number;
-  conductorSeat: number;
-  conductorName: string;
-  key: string;
-  tempo: number;
-  parts: Part[];
-  cues: LoggedCue[];
-}
-
-/** To the TV when the vote starts: everything needed for replays. */
-export interface Performances extends Base {
-  type: "performances";
-  list: Performance[];
 }
 
 export type ServerMessage =
@@ -211,7 +203,6 @@ export type ServerMessage =
   | Cue
   | Volume
   | Bar
-  | Performances
   | Kicked;
 
 export type ClientMessage =
@@ -223,7 +214,6 @@ export type ClientMessage =
   | Volume
   | CueScheduled
   | Bar
-  | Vote
   | HostAction
   | AllOut
   | Categories
@@ -261,6 +251,13 @@ export const MAJOR_PENTATONIC = [0, 2, 4, 7, 9];
 export const STEPS_PER_BEAT = 4;  // 16th notes
 export const LOOP_STEPS = 32;     // 2 bars
 export const MAX_NOTES = 16;
+
+// SCORING (mirrors constants.go)
+export const PERFECT_POINTS = 100;
+export const GOOD_POINTS = 50;
+export const PERFECT_WINDOW_MS = 150;
+export const GOOD_WINDOW_MS = 350;
+export const CUE_LATENCY_MS = 100;
 
 export interface Note {
   id: string;

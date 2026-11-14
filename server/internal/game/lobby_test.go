@@ -137,17 +137,19 @@ func TestCueAckIsMatchedAndCountedOnce(t *testing.T) {
 	host(r, a, protocol.HostStart)
 	r.onDeadline()
 	r.onDeadline()
+	// Two identical targets: a duplicate ack would score the second one.
+	r.targets = []protocol.Target{{Beat: 8, Seat: 2}, {Beat: 8, Seat: 2}}
 	cue := protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "real", Seat: 2, Action: "in"}
 	send(r, a, cue)
-	ack := protocol.CueScheduled{Envelope: protocol.Envelope{Type: protocol.TypeCueScheduled}, ID: "stale", Seat: 2, Action: "in", Beat: 1}
+	ack := protocol.CueScheduled{Envelope: protocol.Envelope{Type: protocol.TypeCueScheduled}, ID: "stale", Seat: 2, Action: "in", Beat: 9, Heard: 8 + protocol.CueLatencyMs*float64(r.tempo)/60000}
 	send(r, tv, ack)
-	if r.players[2].playing {
+	if r.players[2].playing || r.targets[0].Grade != "" {
 		t.Fatal("unknown acknowledgement changed state")
 	}
 	ack.ID = "real"
 	send(r, tv, ack)
 	send(r, tv, ack)
-	if !r.players[2].playing || len(r.cueLog) != 1 {
-		t.Fatal("valid cue wasn't logged exactly once")
+	if !r.players[2].playing || r.targets[0].Grade != protocol.GradePerfect || r.targets[1].Grade != "" {
+		t.Fatalf("valid cue wasn't scored exactly once: %+v", r.targets)
 	}
 }
