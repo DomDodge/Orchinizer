@@ -1,6 +1,7 @@
 package game
 
 import (
+	"sort"
 	"time"
 
 	"orchinizer/protocol"
@@ -11,12 +12,13 @@ const (
 	hitWindowMS     int64 = protocol.ScoreHitWindowMS
 )
 
-// Only the room goroutine changes a score. Gestures are judged on receipt,
-// before the TV quantizes audio to the next beat. No client-supplied scores or clocks.
+// Only the room goroutine changes a score. Gestures are judged on receipt.
+// No client-supplied scores or clocks.
 type roundScorer struct {
-	state protocol.RoundScoring
-	seen  map[string]bool
-	aims  []aim // the conductor's selected seat over time, for holds
+	state   protocol.RoundScoring
+	seen    map[string]bool
+	aims    []aim          // the conductor's selected seat over time, for holds
+	started map[int]string // hold index -> the grade of the flick that started it
 }
 
 type aim struct {
@@ -49,58 +51,42 @@ func (s *roundScorer) aimedShare(seat int, from, to int64) float64 {
 	return float64(on) / float64(to-from)
 }
 
+// newRoundScorer makes the chart: every note of the song, in order, as a
+// prompt on its seat. Notes HoldMinSteps or longer are holds. Notes that
+// can't be judged before perform ends are left off.
 func newRoundScorer(parts []protocol.Part, tempo int, start, end time.Time) *roundScorer {
-	s := &roundScorer{state: protocol.RoundScoring{Targets: []protocol.CueTarget{}}, seen: map[string]bool{}}
-	if len(parts) == 0 || tempo <= 0 {
+	s := &roundScorer{
+		state:   protocol.RoundScoring{Start: start.UnixMilli(), Targets: []protocol.CueTarget{}},
+		seen:    map[string]bool{},
+		started: map[int]string{},
+	}
+	if tempo <= 0 {
 		return s
 	}
-	// Equal opportunities across tempos; spread prompts over whole bars.
-	// Alternate in/out independently per part, with no simultaneous targets.
-	slowestTempo := tempo
-	for _, kt := range roundKeys {
-		slowestTempo = min(slowestTempo, kt.tempo)
+	type note struct{ seat, start, length int }
+	var notes []note
+	for _, p := range parts {
+		for _, n := range p.Notes {
+			notes = append(notes, note{p.Seat, n.Start, n.Length})
+		}
 	}
-	available := end.Sub(start) - time.Duration(hitWindowMS)*time.Millisecond
-	if available <= 0 {
-		return s
-	}
-	maxBars := int(float64(available) * float64(tempo) / float64(4*time.Minute))
-	count := int(float64(available) * float64(slowestTempo) / float64(4*time.Minute))
-	if count == 0 {
-		return s
-	}
+	sort.Slice(notes, func(i, j int) bool {
+		if notes[i].start != notes[j].start {
+			return notes[i].start < notes[j].start
+		}
+		return notes[i].seat < notes[j].seat
+	})
+	stepDur := time.Duration(float64(time.Minute) / float64(tempo*protocol.StepsPerBeat))
 	window := time.Duration(hitWindowMS) * time.Millisecond
-	beatDur := time.Duration(float64(time.Minute) / float64(tempo))
-	var ats []time.Time
-	for i := 0; i < count; i++ {
-		bar := 1
-		if count > 1 {
-			bar += i * (maxBars - 1) / (count - 1)
-		}
-		at := start.Add(time.Duration(bar*4) * beatDur)
+	for _, n := range notes {
+		at := start.Add(time.Duration(n.start) * stepDur)
 		if !at.Add(window).Before(end) {
-			break
+			break // sorted, so every later note is too late as well
 		}
-		ats = append(ats, at)
-	}
-	playing := map[int]bool{}
-	for i, at := range ats {
-		part := parts[i%len(parts)]
-		target := protocol.CueTarget{ID: i + 1, Kind: protocol.TargetFlick, Seat: part.Seat, At: at.UnixMilli(), Result: "pending"}
-		// Every 4th prompt is a hold, if it ends before the next prompt's window opens (and before the song ends).
-		holdEnd := at.Add(protocol.HoldBeats * beatDur)
-		nextOpens := end
-		if i+1 < len(ats) {
-			nextOpens = ats[i+1].Add(-window)
-		}
-		if i%4 == 3 && holdEnd.Before(nextOpens) && holdEnd.Before(end) {
-			target.Kind, target.End = protocol.TargetHold, holdEnd.UnixMilli()
-		} else {
-			target.Action = protocol.CueIn
-			if playing[part.Seat] {
-				target.Action = protocol.CueOut
-			}
-			playing[part.Seat] = !playing[part.Seat]
+		target := protocol.CueTarget{ID: len(s.state.Targets) + 1, Kind: protocol.TargetFlick, Seat: n.seat, At: at.UnixMilli(), Result: "pending"}
+		if n.length >= protocol.HoldMinSteps {
+			target.Kind = protocol.TargetHold
+			target.End = min(at.Add(time.Duration(n.length)*stepDur).UnixMilli(), end.UnixMilli())
 		}
 		s.state.Targets = append(s.state.Targets, target)
 	}
@@ -131,15 +117,20 @@ func (s *roundScorer) judge(index int, result string, at int64) {
 	s.state.Last = &protocol.ScoreJudgment{TargetID: target.ID, Result: result, Points: points, At: at}
 }
 
+// expire misses flicks (and holds nobody started) whose window has passed,
+// and scores started holds that have ended.
 func (s *roundScorer) expire(now int64) bool {
 	changed := false
 	for i, target := range s.state.Targets {
+		if target.Result != "pending" {
+			continue
+		}
+		flick, started := s.started[i]
 		switch {
-		case target.Result != "pending":
-		case target.Kind == protocol.TargetHold && now > target.End:
-			s.judge(i, holdResult(s.aimedShare(target.Seat, target.At, target.End)), now)
+		case started && now > target.End:
+			s.judge(i, holdResult(flick, s.aimedShare(target.Seat, target.At, target.End)), now)
 			changed = true
-		case target.Kind != protocol.TargetHold && now > target.At+hitWindowMS:
+		case !started && now > target.At+hitWindowMS:
 			s.judge(i, "miss", now)
 			changed = true
 		}
@@ -147,16 +138,24 @@ func (s *roundScorer) expire(now int64) bool {
 	return changed
 }
 
-func holdResult(share float64) string {
+var gradeRank = map[string]int{"miss": 0, "good": 1, "perfect": 2}
+
+// holdResult is the worse of the starting flick and the aim over the hold.
+func holdResult(flick string, share float64) string {
+	aim := "miss"
 	switch {
 	case share >= protocol.HoldPerfectShare:
-		return "perfect"
+		aim = "perfect"
 	case share >= protocol.HoldGoodShare:
-		return "good"
+		aim = "good"
 	}
-	return "miss"
+	if gradeRank[flick] < gradeRank[aim] {
+		return flick
+	}
+	return aim
 }
 
+// attempt judges a cue against the next note still waiting for a flick.
 // false means a duplicate cue: do not forward or count it a second time.
 func (s *roundScorer) attempt(cue protocol.Cue, now int64) bool {
 	if s.seen[cue.ID] {
@@ -165,8 +164,8 @@ func (s *roundScorer) attempt(cue protocol.Cue, now int64) bool {
 	s.seen[cue.ID] = true
 	expired := s.expire(now)
 	for i, target := range s.state.Targets {
-		if target.Result != "pending" || target.Kind == protocol.TargetHold {
-			continue // holds are scored from aim, not cues
+		if _, started := s.started[i]; target.Result != "pending" || started {
+			continue
 		}
 		if now < target.At-hitWindowMS {
 			// Keep the late prompt's Miss feedback.
@@ -178,11 +177,15 @@ func (s *roundScorer) attempt(cue protocol.Cue, now int64) bool {
 			return true
 		}
 		result := "miss"
-		if cue.Seat == target.Seat && cue.Action == target.Action {
+		if cue.Seat == target.Seat {
 			result = "good"
 			if now >= target.At-perfectWindowMS && now <= target.At+perfectWindowMS {
 				result = "perfect"
 			}
+		}
+		if target.Kind == protocol.TargetHold && result != "miss" {
+			s.started[i] = result // scored when the hold ends
+			return true
 		}
 		s.judge(i, result, now)
 		return true
@@ -195,8 +198,8 @@ func (s *roundScorer) finish() protocol.ScoreSummary {
 		if target.Result != "pending" {
 			continue
 		}
-		if target.Kind == protocol.TargetHold {
-			s.judge(i, holdResult(s.aimedShare(target.Seat, target.At, target.End)), target.End+1)
+		if flick, started := s.started[i]; started {
+			s.judge(i, holdResult(flick, s.aimedShare(target.Seat, target.At, target.End)), target.End+1)
 		} else {
 			s.judge(i, "miss", target.At+hitWindowMS+1)
 		}

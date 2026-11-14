@@ -25,7 +25,7 @@ export function ScorePanel({ state, aimSeat = 0 }: { state: State; aimSeat?: num
   const onTarget = !holding || aimSeat === target.seat;
   // Approach bar before a prompt; during a hold, how much of the hold has passed.
   const progress = holding ? Math.min(1, (now - target.at) / (target.end - target.at)) : Math.max(0, Math.min(1, 1 - remaining / 2200));
-  const what = target?.kind === 'hold' ? 'HOLD' : `CUE ${target?.action.toUpperCase()}`;
+  const what = target?.kind === 'hold' ? 'FLICK + HOLD' : 'PLAY';
   const resultColor = feedback?.result === 'perfect' ? '#69F0AE' : feedback?.result === 'good' ? '#FFB300' : '#FF5252';
 
   return (

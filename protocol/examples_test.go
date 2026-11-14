@@ -20,7 +20,7 @@ func TestExamples(t *testing.T) {
 		TypePattern: func() any { return &Pattern{} }, TypePatterns: func() any { return &Patterns{} },
 		TypeCalibrated: func() any { return &Calibrated{} }, TypeSelect: func() any { return &Select{} },
 		TypeCue: func() any { return &Cue{} }, TypeVolume: func() any { return &Volume{} },
-		TypeCueScheduled: func() any { return &CueScheduled{} }, TypeBar: func() any { return &Bar{} },
+		TypeBar:        func() any { return &Bar{} },
 		TypeHostAction: func() any { return &HostAction{} },
 	}
 	files, _ := filepath.Glob("examples/*.json")

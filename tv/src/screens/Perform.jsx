@@ -17,7 +17,6 @@ export default function Perform() {
   const hits = useGameState((s) => s.hits)
   const beat = useGameState((s) => s.beat)
   const bar = useGameState((s) => s.bar)
-  const lastCue = useGameState((s) => s.lastCue)
 
   const players = game.players || []
   const conductor = players.find((p) => p.seat === game.conductor)
@@ -37,7 +36,6 @@ export default function Perform() {
     }
   })
 
-  const cuePlayer = lastCue && players.find((p) => p.seat === lastCue.seat)
   const scoring = game.scoring
   const last = scoring?.last
   const lastTarget = last && scoring.targets.find((t) => t.id === last.targetId)
@@ -82,14 +80,6 @@ export default function Perform() {
         >
           {GRADE[last.result]}
           {last.points > 0 && ` +${last.points}`}
-        </div>
-      )}
-
-      {cuePlayer && (
-        // Re-keyed per cue so the fade-in replays.
-        <div key={`${lastCue.beat}-${lastCue.seat}`} className="perf-cue">
-          <span className="perf-cue-dot" style={{ background: cuePlayer.color }} />
-          {cuePlayer.name}'s {cuePlayer.instrument} {lastCue.action === 'in' ? 'came in' : 'dropped out'}
         </div>
       )}
     </Stage>

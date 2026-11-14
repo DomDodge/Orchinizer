@@ -9,7 +9,8 @@ const (
 	// A hold scores Perfect when aimed at the player for this share of it, Good for HoldGoodShare.
 	HoldPerfectShare = 0.9
 	HoldGoodShare    = 0.6
-	HoldBeats        = 3
+	// A note this many steps (16ths) or longer is a hold; shorter ones are flicks.
+	HoldMinSteps = 4
 )
 
 // Categories are presented in this order in every lobby.

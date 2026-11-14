@@ -1,16 +1,16 @@
-// Owns musical time. Every locked pattern is a looping one-bar Tone.Part on the
-// Transport. Cues land on the next beat; all music-tied visuals go through Tone.Draw.
+// Owns musical time. In perform the Transport runs the song (the shared sheet) from step 0,
+// lined up with the server's clock, but nothing plays on its own: a note sounds only when
+// the conductor cues its seat close enough to it. All music-tied visuals go through Tone.Draw.
 //
-// A performance is { round, tempo, key, players: [{ seat, instrument, pattern }], events }.
-// `events` is the cue/volume log, sorted by tick:
-//   { tick, beat, seat, type: 'cue', action: 'in' | 'out', id }
-//   { tick, beat, seat, type: 'volume', level }
+// A performance is { round, tempo, key, start, players: [{ seat, instrument, pattern }] }.
 import * as Tone from 'tone'
 import * as store from '../state/store.js'
 import { send } from '../net/socket.js'
 import * as instruments from './instruments.js' // only via play / setVolume / dispose
 import { partNotes, STEPS_PER_BEAT } from './part.js'
 import lobbyMusicUrl from './music/lobby.mp3'
+
+const HIT_WINDOW_MS = 300 // /protocol ScoreHitWindowMS
 
 if (import.meta.env.DEV) window.Tone = Tone // for poking at the Transport from devtools
 
@@ -21,7 +21,7 @@ const Draw = Tone.getDraw()
 let master = null // everything goes through this; muting sets it to 0 and timing carries on
 let perf = null
 let live = false
-let voices = {} // seat -> { insts: { instrument: inst }, part, setVolume(level, time?) }
+let voices = {} // seat -> { insts: { instrument: inst }, instrument, notes, setVolume(level, time?) }
 
 // Must be called from a click handler.
 export function unlock() {
@@ -37,13 +37,6 @@ export function setMuted(muted) {
   master?.gain.rampTo(muted ? 0 : 1, 0.05)
 }
 
-// Events reach the audio thread ~lookAhead early, so anything at or before this tick is
-// already committed. The next beat after it is the earliest beat we can still change.
-function nextBeatTick() {
-  const committed = T.getTicksAtTime(Tone.now() + 0.06)
-  return (Math.floor(committed / T.PPQ) + 1) * T.PPQ
-}
-
 // For visuals that move continuously (falling notes): the Transport position of what's
 // being heard right now. Reading the audio clock each frame keeps them locked to the sound.
 export function timeline() {
@@ -54,43 +47,8 @@ export function timeline() {
   }
 }
 
-// Whether a seat's part is (or, for already-scheduled cues, will be) playing at `tick`.
-export function seatOn(seat, tick) {
-  return !!perf && isOn(seat, tick)
-}
-
-function isOn(seat, tick) {
-  let on = false
-  for (const e of perf.events) {
-    if (e.tick > tick) break
-    if (e.seat === seat && e.type === 'cue') on = e.action === 'in'
-  }
-  return on
-}
-
-function insertEvent(e) {
-  let i = perf.events.length
-  while (i > 0 && perf.events[i - 1].tick > e.tick) i--
-  perf.events.splice(i, 0, e)
-}
-
-// Applies a logged cue when the Transport reaches it. (Live volumes are applied the moment
-// they arrive, so they're only logged.)
-function scheduleEvent(e) {
-  T.schedule((time) => {
-    if (e.type === 'volume') {
-      voices[e.seat]?.setVolume(e.level, time)
-    }
-    Draw.schedule(() => {
-      if (e.type === 'cue') {
-        store.setCue(e.seat, e.action, e.beat)
-        if (live) console.log(`[audio] cue #${e.id} seat ${e.seat} ${e.action} landed on beat ${e.beat}`)
-      } else {
-        store.setVolume(e.seat, e.level)
-      }
-    }, time)
-  }, `${e.tick}i`)
-}
+// A seat's song notes, each { row, start, length, instrument, tick, played }, for the lanes.
+export const seatNotes = (seat) => voices[seat]?.notes || []
 
 function load(p) {
   teardown()
@@ -101,32 +59,17 @@ function load(p) {
 
   const ticksPerStep = T.PPQ / STEPS_PER_BEAT
   for (const pl of p.players) {
-    // Grid parts loop every bar in 8ths; note-editor parts every 2 bars in 16ths, with
-    // held notes and optionally a different instrument per note. partNotes unifies them.
-    const { loopSteps, notes } = partNotes(pl.pattern)
+    // Held notes, optionally a different instrument per note. Nothing is scheduled: notes
+    // play from the 'cue' handler below.
+    const { notes } = partNotes(pl.pattern)
     const insts = {}
     for (const name of new Set([pl.instrument, ...notes.map((n) => n.instrument || pl.instrument)])) {
       insts[name] = instruments.create(name, master, { key: p.key })
     }
-
-    // One event per step that has notes on it.
-    const byStart = new Map()
-    for (const n of notes) byStart.set(n.start, [...(byStart.get(n.start) || []), n])
-    const events = [...byStart].map(([start, ns]) => ({ time: `${start * ticksPerStep}i`, notes: ns }))
-    const part = new Tone.Part((time, ev) => {
-      if (!isOn(pl.seat, Math.round(T.getTicksAtTime(time)))) return
-      for (const n of ev.notes) {
-        const dur = Tone.Ticks(n.length * ticksPerStep).toSeconds()
-        insts[n.instrument || pl.instrument].play(n.row, time, dur)
-      }
-      Draw.schedule(() => store.bumpHit(pl.seat), time)
-    }, events)
-    part.loop = true
-    part.loopEnd = `${loopSteps * ticksPerStep}i`
-    part.start(0)
     voices[pl.seat] = {
       insts,
-      part,
+      instrument: pl.instrument,
+      notes: notes.map((n) => ({ ...n, tick: n.start * ticksPerStep, played: false })),
       setVolume: (level, t) => Object.values(insts).forEach((i) => i.setVolume(level, t)),
     }
   }
@@ -139,14 +82,12 @@ function load(p) {
       if (beat % 4 === 0 && live) send('bar', { bar: beat / 4, tempo: perf.tempo })
     }, time)
   }, '4n', 0)
-
-  p.events.forEach(scheduleEvent)
 }
 
 function teardown() {
   T.stop()
   T.cancel(0)
-  Object.values(voices).forEach((v) => (v.part.dispose(), Object.values(v.insts).forEach((i) => i.dispose())))
+  Object.values(voices).forEach((v) => Object.values(v.insts).forEach((i) => i.dispose()))
   voices = {}
   store.resetPlayback()
 }
@@ -159,11 +100,14 @@ function startLive(state) {
     players: state.players
       .filter((pl) => pl.seat !== state.conductor && pl.pattern)
       .map(({ seat, instrument, pattern }) => ({ seat, instrument, pattern })),
-    events: [],
   }
   live = true
   load(p)
-  T.start('+0.1')
+  // Step 0 of the song is the server's scoring.start, so the lanes land notes when the
+  // server judges them. Joining late (or a reload) starts mid-song.
+  const start = state.scoring?.start
+  const elapsed = start ? (Date.now() - state.serverOffset - start) / 1000 : 0
+  T.start('+0.05', Math.max(0, elapsed + 0.05))
 }
 
 function stopLive() {
@@ -205,20 +149,27 @@ function setLobbyMusic(on) {
   else if (!on && lobbyMusic.state === 'started') lobbyMusic.stop()
 }
 
+// The conductor played a seat: sound that seat's unplayed note nearest to now, if one is
+// within the hit window. The server scores the same cue; this is only the sound.
 store.on('cue', (msg) => {
-  if (!live || !voices[msg.seat]) return
-  const tick = nextBeatTick()
-  const e = { tick, beat: tick / T.PPQ, seat: msg.seat, type: 'cue', action: msg.action, id: msg.id }
-  insertEvent(e)
-  scheduleEvent(e)
-  send('cue_scheduled', { id: msg.id, seat: msg.seat, action: msg.action, beat: e.beat })
-  console.log(`[audio] cue #${msg.id} seat ${msg.seat} ${msg.action} at beat ${(T.ticks / T.PPQ).toFixed(2)} -> beat ${e.beat}`)
+  const v = live && voices[msg.seat]
+  if (!v) return
+  const tick = T.getTicksAtTime(Tone.immediate())
+  const window = (HIT_WINDOW_MS / 1000) * (T.bpm.value / 60) * T.PPQ
+  let best = null
+  for (const n of v.notes) {
+    if (!n.played && Math.abs(n.tick - tick) <= window && (!best || Math.abs(n.tick - tick) < Math.abs(best.tick - tick))) best = n
+  }
+  if (!best) return console.log(`[audio] cue #${msg.id} seat ${msg.seat}: no note near beat ${(tick / T.PPQ).toFixed(2)}`)
+  best.played = true
+  const dur = Tone.Ticks(best.length * (T.PPQ / STEPS_PER_BEAT)).toSeconds()
+  const now = Tone.now()
+  v.insts[best.instrument || v.instrument].play(best.row, now, dur)
+  Draw.schedule(() => store.notePlayed(msg.seat, true), now)
+  Draw.schedule(() => store.notePlayed(msg.seat, false), now + dur)
 })
 
 store.on('volume', (msg) => {
   if (!live || !voices[msg.seat]) return
-  // Heard at Tone.now(), so that's the tick we log.
-  const tick = Math.round(T.getTicksAtTime(Tone.now()))
   voices[msg.seat].setVolume(msg.level)
-  insertEvent({ tick, beat: Math.floor(tick / T.PPQ), seat: msg.seat, type: 'volume', level: msg.level })
 })
