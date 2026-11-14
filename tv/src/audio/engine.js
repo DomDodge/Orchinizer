@@ -11,6 +11,7 @@ import * as store from '../state/store.js'
 import { send } from '../net/socket.js'
 import * as instruments from './instruments.js' // only via play / setVolume / dispose
 import { partNotes, STEPS_PER_BEAT } from './part.js'
+import lobbyMusicUrl from './music/lobby.mp3'
 
 if (import.meta.env.DEV) window.Tone = Tone // for poking at the Transport from devtools
 
@@ -178,9 +179,37 @@ function stopLive() {
 
 store.on('state', (s) => {
   if (!master) return
+  setLobbyMusic(s.phase === 'lobby')
   if (s.phase === 'perform' && !live) startLive(s)
   else if (s.phase !== 'perform' && live) stopLive()
 })
+
+// ---- lobby music ----
+
+// Loops while the lobby is on screen. It goes through `master`, so the lobby's mute button
+// silences it too, and it runs on its own clock, not the Transport, so the show can't stop it.
+let lobbyMusic = null // created on first use, once audio is unlocked
+let wantLobbyMusic = false
+
+function setLobbyMusic(on) {
+  wantLobbyMusic = on
+  if (!lobbyMusic) {
+    if (!on) return
+    lobbyMusic = new Tone.Player({
+      url: lobbyMusicUrl,
+      loop: true,
+      fadeIn: 1,
+      fadeOut: 1,
+      volume: -6,
+      // The file loads in the background; start it then if the lobby is still up.
+      onload: () => wantLobbyMusic && lobbyMusic.start(),
+    }).connect(master)
+    return
+  }
+  if (!lobbyMusic.loaded) return // onload will start it if needed
+  if (on && lobbyMusic.state !== 'started') lobbyMusic.start()
+  else if (!on && lobbyMusic.state === 'started') lobbyMusic.stop()
+}
 
 store.on('cue', (msg) => {
   if (!live || !voices[msg.seat]) return
