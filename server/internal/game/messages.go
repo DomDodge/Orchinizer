@@ -2,7 +2,6 @@ package game
 
 import (
 	"encoding/json"
-	"strconv"
 	"time"
 
 	"orchinizer/protocol"
@@ -27,13 +26,6 @@ func (r *Room) onMessage(c Client, typ string, raw []byte) {
 
 	case protocol.TypeSelect, protocol.TypeCue, protocol.TypeVolume, protocol.TypeCalibrated:
 		r.onConductor(c, p, typ, raw)
-
-	case protocol.TypeCueScheduled:
-		if !isTV {
-			r.reject(c, "only the tv sends cue_scheduled")
-			return
-		}
-		r.onCueScheduled(c, raw)
 
 	case protocol.TypeBar:
 		if !isTV {
@@ -234,28 +226,14 @@ func (r *Room) onConductor(c Client, p *player, typ string, raw []byte) {
 			r.reject(c, "Cue ID is required")
 			return
 		}
-		if m.Action == protocol.CueAllOut && m.Seat == 0 {
-			if !r.scoreCue(m) {
-				return
-			}
-			for _, q := range r.seatOrder() {
-				if q.seat != r.conductor {
-					cue := protocol.Cue{Envelope: r.env(typ), ID: m.ID + "-" + strconv.Itoa(q.seat), Seat: q.seat, Action: protocol.CueOut}
-					r.pending[cue.ID] = cue
-					r.sendTo(r.tv, cue)
-				}
-			}
-			return
-		}
-		if r.players[m.Seat] == nil || m.Seat == r.conductor || !validAction(m.Action) {
-			r.reject(c, "cue needs a player's seat and action in/out")
+		if r.players[m.Seat] == nil || m.Seat == r.conductor {
+			r.reject(c, "cue needs a player's seat")
 			return
 		}
 		if !r.scoreCue(m) {
 			return
 		}
 		m.Envelope = r.env(typ)
-		r.pending[m.ID] = m
 		out = m
 	case protocol.TypeVolume:
 		var m protocol.Volume
@@ -308,27 +286,6 @@ func conductorAllowed(phase, typ string) bool {
 	default: // cue, volume
 		return phase == protocol.PhasePerform
 	}
-}
-
-func (r *Room) onCueScheduled(c Client, raw []byte) {
-	if r.phase != protocol.PhasePerform && r.phase != protocol.PhaseLobby {
-		return // a cue that landed after perform ended; ignore quietly
-	}
-	var m protocol.CueScheduled
-	if !r.decode(c, raw, &m) {
-		return
-	}
-	if r.players[m.Seat] == nil || !validAction(m.Action) {
-		r.reject(c, "cue_scheduled needs an existing seat and action in/out")
-		return
-	}
-	queued, ok := r.pending[m.ID]
-	if !ok || queued.Seat != m.Seat || queued.Action != m.Action {
-		return
-	}
-	delete(r.pending, m.ID)
-	r.players[m.Seat].playing = m.Action == protocol.CueIn
-	r.broadcastState()
 }
 
 // minStreamInterval keeps select and volume at 10/s or less each. A little

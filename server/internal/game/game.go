@@ -212,7 +212,7 @@ func (r *Room) startCompose(conductor int) {
 	// Human picks persist. Bots fill unclaimed active instruments each round.
 	used := map[string]bool{}
 	for _, p := range r.seatOrder() {
-		p.playing, p.level, p.done = false, 80, false
+		p.level, p.done = 80, false
 		p.steps, p.noteCount = protocol.Grid{}, 0
 		p.notes = nil
 		if !p.bot {
@@ -236,7 +236,6 @@ func (r *Room) startCompose(conductor int) {
 			// Bots write their part at the end of compose, into whatever space the humans left.
 		}
 	}
-	r.pending = map[string]protocol.Cue{}
 	r.lastSelect, r.lastVolume = time.Time{}, time.Time{}
 	r.aimSeat = 0 // a new conductor hasn't pointed at anyone yet
 
@@ -266,9 +265,6 @@ func (r *Room) startCalibrate() {
 
 func (r *Room) startPerform() {
 	r.phase = protocol.PhasePerform
-	for _, p := range r.players {
-		p.playing = false
-	}
 	r.setDeadline(r.timings.Perform)
 	r.scorer = newRoundScorer(r.currentParts(), r.tempo, time.Now(), r.deadline)
 	r.scorer.aimAt(r.aimSeat, time.Now().UnixMilli()) // already pointing from calibration
@@ -291,9 +287,6 @@ func (r *Room) finishPerformance() {
 		Round: r.round, ConductorSeat: r.conductor, ConductorName: name,
 		Key: r.key, Tempo: r.tempo, Score: score,
 	})
-	for _, p := range r.players {
-		p.playing = false
-	}
 }
 
 // startResults shows the scores. The most points wins; a tie goes to the
@@ -331,14 +324,13 @@ func (r *Room) toLobby() {
 			delete(r.players, seat)
 			continue
 		}
-		p.playing, p.done = false, false
+		p.done = false
 		p.steps, p.noteCount = protocol.Grid{}, 0
 		p.notes = nil
 		p.instrument = p.pick
 		p.level = 80
 	}
 	r.phase = protocol.PhaseLobby
-	r.pending = map[string]protocol.Cue{}
 	r.round, r.conductor, r.order = 0, 0, nil
 	r.locked = false
 	r.key, r.tempo = "C", 100

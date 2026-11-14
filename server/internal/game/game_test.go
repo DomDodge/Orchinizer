@@ -118,7 +118,7 @@ func TestFullGame(t *testing.T) {
 		t.Fatalf("conductor composed: %q", ada.lastError())
 	}
 	// Ada can't cue during compose.
-	send(r, ada, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "x", Seat: 2, Action: "in"})
+	send(r, ada, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "x", Seat: 2})
 	if ada.lastError() == "" {
 		t.Fatal("cue accepted during compose")
 	}
@@ -155,29 +155,25 @@ func TestFullGame(t *testing.T) {
 		t.Fatalf("tv didn't get calibrated: %+v", cal)
 	}
 
-	// Perform: cue goes to the TV, the TV's cue_scheduled is logged.
-	send(r, ada, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "c1", Seat: 2, Action: "in"})
+	// Perform: a cue goes to the TV, which plays that seat's note.
+	send(r, ada, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "c1", Seat: 2})
 	var cue protocol.Cue
 	if !tv.last(protocol.TypeCue, &cue) || cue.Seat != 2 {
 		t.Fatalf("tv didn't get cue: %+v", cue)
 	}
-	send(r, tv, protocol.CueScheduled{Envelope: protocol.Envelope{Type: protocol.TypeCueScheduled}, ID: "c1", Seat: 2, Action: "in", Beat: 4})
-	if !bob.state(t).Players[1].Playing {
-		t.Fatal("bob not playing after cue_scheduled")
-	}
 	// Bob can't cue: he's not conducting.
-	send(r, bob, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "c2", Seat: 3, Action: "in"})
+	send(r, bob, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "c2", Seat: 3})
 	if bob.lastError() == "" {
 		t.Fatal("non-conductor cue accepted")
 	}
 
-	// Perform ends -> round 2, Bob conducts, key may change, playing resets.
+	// Perform ends -> round 2, Bob conducts, key may change.
 	r.onDeadline()
 	s = tv.state(t)
 	if s.Phase != protocol.PhaseCompose || s.Round != 2 || s.Conductor != 2 {
 		t.Fatalf("round 2: %+v", s)
 	}
-	if s.Players[1].Playing || s.Players[1].Instrument != "" || s.Players[0].Instrument == "" {
+	if s.Players[1].Instrument != "" || s.Players[0].Instrument == "" {
 		t.Fatalf("round 2 seats: %+v", s.Players)
 	}
 	notesMsg(r, ada, []protocol.Note{note("a", 0, 0, 2), note("b", 1, 4, 2)})
@@ -310,8 +306,8 @@ func TestSelectRateLimit(t *testing.T) {
 		t.Fatalf("tv got %d selects from a burst, want 1", n)
 	}
 	// Cues aren't rate limited.
-	send(r, a, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "1", Seat: 2, Action: "in"})
-	send(r, a, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "2", Seat: 2, Action: "out"})
+	send(r, a, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "1", Seat: 2})
+	send(r, a, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "2", Seat: 2})
 	var cue protocol.Cue
 	if !tv.last(protocol.TypeCue, &cue) || cue.ID != "2" {
 		t.Fatalf("second cue dropped: %+v", cue)

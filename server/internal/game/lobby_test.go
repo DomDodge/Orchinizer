@@ -69,7 +69,7 @@ func TestPhoneStartPreservesPicksAndRequiresTV(t *testing.T) {
 	if r.phase != protocol.PhaseLobby {
 		t.Fatal("started without audio TV")
 	}
-	tv := joinTV(r)
+	joinTV(r)
 	host(r, b, protocol.HostStart)
 	if r.phase != protocol.PhaseLobby {
 		t.Fatal("non-host started")
@@ -80,11 +80,6 @@ func TestPhoneStartPreservesPicksAndRequiresTV(t *testing.T) {
 	}
 	r.onDeadline()
 	r.onDeadline()
-	send(r, a, protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "stop", Seat: 0, Action: "all_out"})
-	var cue protocol.Cue
-	if !tv.last(protocol.TypeCue, &cue) || cue.Action != "out" || cue.Seat == 0 {
-		t.Fatal("all_out didn't expand to ordinary TV cues")
-	}
 	r.onDeadline()
 	if r.conductor != 2 || r.players[1].instrument != "piano" {
 		t.Fatal("rotation lost the host's instrument")
@@ -127,31 +122,5 @@ func TestStartValidationAndLockedLobby(t *testing.T) {
 	r.onLeave(tv)
 	if a.state(t).TVConnected {
 		t.Fatal("TV drop wasn't broadcast")
-	}
-}
-func TestCueAckIsMatchedAndCountedOnce(t *testing.T) {
-	r := newTestRoom()
-	tv := joinTV(r)
-	a := joinPlayer(r, "Ana")
-	joinPlayer(r, "Ben")
-	host(r, a, protocol.HostStart)
-	r.onDeadline()
-	r.onDeadline()
-	cue := protocol.Cue{Envelope: protocol.Envelope{Type: protocol.TypeCue}, ID: "real", Seat: 2, Action: "in"}
-	send(r, a, cue)
-	ack := protocol.CueScheduled{Envelope: protocol.Envelope{Type: protocol.TypeCueScheduled}, ID: "stale", Seat: 2, Action: "in", Beat: 1}
-	send(r, tv, ack)
-	if r.players[2].playing {
-		t.Fatal("unknown acknowledgement changed state")
-	}
-	ack.ID = "real"
-	send(r, tv, ack)
-	if !r.players[2].playing {
-		t.Fatal("valid cue wasn't applied")
-	}
-	r.players[2].playing = false
-	send(r, tv, ack) // a repeat is dropped
-	if r.players[2].playing {
-		t.Fatal("repeated acknowledgement was applied twice")
 	}
 }

@@ -110,19 +110,19 @@ func TestRelayFlow(t *testing.T) {
 	}
 
 	// Cue (no conductor set yet, so any player may cue) -> TV.
-	ada.send(protocol.Cue{Envelope: protocol.Envelope{Type: "cue"}, ID: "c1", Seat: 2, Action: "in"})
+	ada.send(protocol.Cue{Envelope: protocol.Envelope{Type: "cue"}, ID: "c1", Seat: 2})
 	var cue protocol.Cue
 	tv.expect("cue", &cue)
-	if cue.Seat != 2 || cue.Action != "in" || cue.Room != room {
+	if cue.Seat != 2 || cue.Room != room {
 		t.Fatalf("cue %+v", cue)
 	}
 
-	// cue_scheduled from the TV marks the part as playing.
-	tv.send(protocol.CueScheduled{Envelope: protocol.Envelope{Type: "cue_scheduled"}, ID: "c1", Seat: 2, Action: "in", Beat: 4})
+	// Volume reaches the TV and shows up as the seat's level.
+	ada.send(protocol.Volume{Envelope: protocol.Envelope{Type: "volume"}, Seat: 2, Level: 35})
 	var st protocol.State
 	for {
 		bob.expect("state", &st)
-		if len(st.Players) == 2 && st.Players[1].Playing {
+		if len(st.Players) == 2 && st.Players[1].Level == 35 {
 			break
 		}
 	}
@@ -233,10 +233,10 @@ func TestLobbyDropKeepsSeatAndTVIsProtected(t *testing.T) {
 	var w3 protocol.Welcome
 	y.expect("welcome", &w3)
 
-	// Validation: volume and cue_scheduled for a seat that doesn't exist.
+	// Validation: volume for a seat that doesn't exist, and the retired cue_scheduled.
 	a2.send(protocol.Volume{Envelope: protocol.Envelope{Type: "volume"}, Seat: 7, Level: 50})
 	a2.expect("error", &e)
-	y.send(protocol.CueScheduled{Envelope: protocol.Envelope{Type: "cue_scheduled"}, ID: "x", Seat: 1, Action: "sideways", Beat: 1})
+	y.send(protocol.Envelope{Type: "cue_scheduled"})
 	y.expect("error", &e)
 	if e.Code != protocol.ErrNotAllowed {
 		t.Fatalf("error %+v", e)

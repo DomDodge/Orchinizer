@@ -73,13 +73,12 @@ test('phone lobby → token reconnect → two conductor rounds → scores → re
     host.api.send({ type: 'host_action', action: 'start' }); await host.wait(s => !!s.error);
     assert.equal(host.api.useNet().state.phase, 'lobby'); host.api.clearError();
     tv = new WebSocket(url); await once(tv, 'open');
-    tv.addEventListener('message', e => { const m = JSON.parse(String(e.data)); if (m.type === 'cue') tv!.send(JSON.stringify({ ...m, type: 'cue_scheduled', beat: 4 })); });
     tv.send(JSON.stringify({ type: 'join', role: 'tv', room })); await host.wait(s => s.state.tvConnected);
     const next = () => tv!.send(JSON.stringify({ type: 'host_action', action: 'next' }));
     host.api.send({ type: 'host_action', action: 'start' });
     await host.wait(s => s.state.phase === 'compose'); await guest.wait(s => s.state.phase === 'compose');
     // Compose takes note-editor parts (grids are rejected during compose).
-    guest.api.send({ type: 'pattern', notes: [{ id: 'n1', row: 1, start: 2, length: 1 }] }); const guestSeat = guest.api.useNet().seat;
+    guest.api.send({ type: 'pattern', notes: [{ id: 'a', row: 1, start: 2, length: 1 }] }); const guestSeat = guest.api.useNet().seat;
     await host.wait(s => s.state.notes?.[guestSeat]?.[0]?.start === 2);
     guest.sockets[0].close(); await guest.wait(s => !s.connected);
     assert.equal((await guest.wait(s => s.connected && s.state.notes?.[guestSeat]?.[0]?.start === 2)).seat, guestSeat);
@@ -92,25 +91,24 @@ test('phone lobby → token reconnect → two conductor rounds → scores → re
     // The guest is the only human composing (the host conducts), so their Done ends compose early.
     guest.api.send({ type: 'done', done: true }); await host.wait(s => s.state.phase === 'calibrate');
     host.api.send({ type: 'calibrated', angles: {} }); await host.wait(s => s.state.phase === 'perform');
-    const target = host.api.useNet().state.scoring.targets[0];
+    // The chart is the song: play the first short note (earlier long ones just miss).
+    const target = host.api.useNet().state.scoring.targets.find((t: any) => t.kind === 'flick');
     assert.ok(target && target.result === 'pending');
     const offset = host.api.useNet().state.serverTime - Date.now();
     await new Promise(resolve => setTimeout(resolve, Math.max(0, target.at - (Date.now() + offset))));
-    const scoredCue = { type: 'cue', id: 'scored-target', seat: target.seat, action: target.action };
+    const scoredCue = { type: 'cue', id: 'scored-target', seat: target.seat };
     host.api.send(scoredCue);
     await host.wait(s => s.state.scoring.summary.perfect + s.state.scoring.summary.good === 1);
     const earned = host.api.useNet().state.scoring.summary.points;
     assert.ok(earned === 50 || earned === 100);
     host.api.send(scoredCue); // reconnect/retry must not award this cue twice
-    host.api.send({ type: 'cue', id: 'in-1', seat: guestSeat, action: 'in' }); await host.wait(s => s.state.live[guestSeat] === 80);
     assert.equal(host.api.useNet().state.scoring.summary.points, earned);
     host.sockets[0].close(); await host.wait(s => !s.connected);
     await host.wait(s => s.connected && s.state.scoring?.summary.points === earned);
-    const secondTarget = host.api.useNet().state.scoring.targets[1];
+    const secondTarget = host.api.useNet().state.scoring.targets.find((t: any) => t.at > target.at);
     await new Promise(resolve => setTimeout(resolve, Math.max(0, secondTarget.at + 450 - (Date.now() + offset))));
     await host.wait(s => s.state.scoring.summary.misses >= 1);
-    host.api.send({ type: 'volume', seat: guestSeat, level: 35 }); await host.wait(s => s.state.live[guestSeat] === 35);
-    host.api.send({ type: 'cue', id: 'stop-all', seat: 0, action: 'all_out' }); await host.wait(s => Object.keys(s.state.live).length === 0);
+    host.api.send({ type: 'volume', seat: guestSeat, level: 35 }); await host.wait(s => s.state.players.find((p: any) => p.seat === guestSeat).level === 35);
     next(); await guest.wait(s => s.state.phase === 'compose' && s.state.round === 2);
     assert.equal(guest.api.useNet().state.scoring, undefined);
     assert.equal(guest.api.useNet().state.conductor, guestSeat); await host.wait(s => s.state.round === 2);
@@ -118,7 +116,6 @@ test('phone lobby → token reconnect → two conductor rounds → scores → re
     next(); await guest.wait(s => s.state.phase === 'calibrate'); guest.api.send({ type: 'calibrated', angles: {} });
     await guest.wait(s => s.state.phase === 'perform');
     assert.equal(guest.api.useNet().state.scoring.summary.points, 0);
-    guest.api.send({ type: 'cue', id: 'in-2', seat: initial.seat, action: 'in' }); await host.wait(s => s.state.live[initial.seat] === 80);
     next(); await host.wait(s => s.state.phase === 'results'); await guest.wait(s => s.state.phase === 'results');
     assert.equal(host.api.useNet().state.performances.length, 2);
     assert.equal(host.api.useNet().state.performances[0].score.points, earned);

@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { send, useSecondsLeft, useNet } from '../net';
 import { instrumentInfo, type Player, type State } from '../protocol';
@@ -26,16 +26,21 @@ export function HoldUp({ state, me }: { state: State; me: Player }) {
   );
 }
 
-/** Perform: glow in your color while your part plays, pulse on the beat, buzz when cued in. */
+/** Perform: flash in your color and buzz when the conductor plays one of your notes; pulse on the beat. */
 export function Playing({ state, me }: { state: State; me: Player }) {
   const left = useSecondsLeft(state.deadline);
-  const level = state.live[me.seat];
-  const on = level != null;
-  const was = useRef(on);
+  const last = state.scoring?.last;
+  const lastSeat = last && state.scoring?.targets.find((t) => t.id === last.targetId)?.seat;
+  const hit = lastSeat === me.seat && (last?.result === 'perfect' || last?.result === 'good');
+  const hitKey = hit ? `${last?.targetId}-${last?.at}` : '';
+  const [faded, setFaded] = useState(''); // the hit whose flash is over
+  const on = hit && faded !== hitKey;
   useEffect(() => {
-    if (on && !was.current) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    was.current = on;
-  }, [on]);
+    if (!hitKey) return;
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    const t = setTimeout(() => setFaded(hitKey), 500);
+    return () => clearTimeout(t);
+  }, [hitKey]);
 
   if (!me.instrument)
     return (
@@ -50,7 +55,7 @@ export function Playing({ state, me }: { state: State; me: Player }) {
       <BeatRing color={on ? '#fff' : me.color} size={300} />
       <Text style={[styles.seat, { color: on ? BG : me.color }]}>{me.seat}</Text>
       <H1 color={on ? BG : me.color}>
-        {instrumentInfo(me.instrument).emoji} {on ? `You're in! ${level}%` : 'Waiting for your cue'}
+        {instrumentInfo(me.instrument).emoji} {on ? 'Played!' : 'Watch the TV for your notes'}
       </H1>
       <Timer left={left} />
     </Screen>

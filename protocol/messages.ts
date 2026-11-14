@@ -3,7 +3,6 @@
 
 export type Role = "tv" | "player";
 export type Phase = "lobby" | "compose" | "calibrate" | "perform" | "results";
-export type CueAction = "in" | "out";
 export type HostActionKind = "start" | "next" | "skip" | "restart";
 export type ErrorCode =
   | "bad_message"
@@ -61,7 +60,7 @@ export interface PlayerState {
   connected: boolean;
   bot: boolean;
   noteCount: number;
-  playing: boolean;
+  level: number; // volume 0-100, set by the conductor's tilt
   done: boolean; // tapped Done in compose; bots always are
 }
 
@@ -89,12 +88,13 @@ interface CueTargetBase {
   at: number; // server Unix milliseconds; score the gesture, before TV quantization
   result: 'pending' | 'perfect' | 'good' | 'miss';
 }
-/** A prompt on the conductor's chart. `kind` is the gesture it wants (see README "Note types"). */
+/** One note of the song on the conductor's chart. `kind` is the gesture it wants (see README "Note types"). */
 export type CueTarget =
-  | (CueTargetBase & { kind: 'flick'; action: CueAction })
-  | (CueTargetBase & { kind: 'hold'; end: number }); // keep pointing at seat from at to end
+  | (CueTargetBase & { kind: 'flick' })
+  | (CueTargetBase & { kind: 'hold'; end: number }); // flick at `at`, then keep pointing at seat until end
 
 export interface RoundScoring {
+  start: number; // server Unix ms perform began: step 0 of the song
   summary: ScoreSummary;
   combo: number;
   targets: CueTarget[];
@@ -104,6 +104,8 @@ export interface RoundScoring {
 export const SCORE_HIT_WINDOW_MS = 300;
 export const HOLD_PERFECT_SHARE = 0.9;
 export const HOLD_GOOD_SHARE = 0.6;
+/** A note this many steps (16ths) or longer is a hold; shorter ones are flicks. */
+export const HOLD_MIN_STEPS = 4;
 
 /** Full game state, broadcast on every change. */
 export interface State extends Base {
@@ -130,7 +132,6 @@ export interface State extends Base {
   patterns: Record<string, Grid>;
   /** Note-editor parts by seat. Seats without notes are left out. */
   notes?: Record<string, Note[]>;
-  live: Record<string, number>;
   winner: number; // round with the most points (ties go to the earlier round), 0 = none
   scoring?: RoundScoring;
 }
@@ -172,26 +173,17 @@ export interface Select extends Base {
   seat: number;
 }
 
+/** The conductor plays `seat`'s note: the TV plays that seat's note nearest now, if one is in the hit window. */
 export interface Cue extends Base {
   type: "cue";
   id: string;
   seat: number;
-  action: CueAction;
 }
 
 export interface Volume extends Base {
   type: "volume";
   seat: number;
   level: number; // 0-100
-}
-
-/** TV -> server: the beat a cue actually played on. Beat 0 = transport start. */
-export interface CueScheduled extends Base {
-  type: "cue_scheduled";
-  id: string;
-  seat: number;
-  action: CueAction;
-  beat: number;
 }
 
 export interface Bar extends Base {
@@ -224,10 +216,8 @@ export type ClientMessage =
   | Select
   | Cue
   | Volume
-  | CueScheduled
   | Bar
   | HostAction
-  | AllOut
   | Categories
   | Pick
   | Leave
@@ -241,7 +231,6 @@ export interface ServerConfig {
 
 /** Shared constants. The server is the source of truth; these are for display and dev. */
 export type Category = "strings" | "wind" | "percussion" | "keys";
-export interface AllOut extends Base { type: "cue"; id: string; seat: 0; action: "all_out" }
 export interface Categories extends Base { type: "categories"; categories: Category[] }
 export interface Pick extends Base { type: "pick"; instrument: string | null }
 export interface Leave extends Base { type: "leave" }

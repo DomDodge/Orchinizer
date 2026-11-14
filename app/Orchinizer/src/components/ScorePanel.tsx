@@ -30,7 +30,7 @@ export function ScorePanel({ state, aimSeat = 0 }: { state: State; aimSeat?: num
   const onTarget = !holding || aimSeat === target.seat;
   // Approach bar before a prompt; during a hold, how much of the hold has passed.
   const progress = holding ? Math.min(1, (now - target.at) / (target.end - target.at)) : Math.max(0, Math.min(1, 1 - remaining / 2200));
-  const what = target?.kind === 'hold' ? 'HOLD' : `CUE ${target?.action.toUpperCase()}`;
+  const what = target?.kind === 'hold' ? 'FLICK + HOLD' : 'PLAY';
   const resultColor = feedback?.result === 'perfect' ? '#69F0AE' : feedback?.result === 'good' ? '#FFB300' : '#FF5252';
 
   return (
@@ -83,7 +83,7 @@ function Lanes({ state, now, aimSeat }: { state: State; now: number; aimSeat: nu
                 key={t.id}
                 style={[styles.chip, { top: top - 12, height: bottom - top + 24, backgroundColor: missed ? '#33334A' : p.color }]}
               >
-                <Text style={styles.chipText}>{missed ? 'MISS' : t.kind === 'hold' ? 'HOLD' : t.action.toUpperCase()}</Text>
+                <Text style={styles.chipText}>{missed ? 'MISS' : t.kind === 'hold' ? 'HOLD' : 'PLAY'}</Text>
               </View>
             );
           })}

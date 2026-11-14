@@ -5,25 +5,24 @@ package protocol
 
 // Message types.
 const (
-	TypeCategories   = "categories"
-	TypePick         = "pick"
-	TypeLeave        = "leave"
-	TypeKick         = "kick"
-	TypeKicked       = "kicked"
-	TypeJoin         = "join"          // any client -> server
-	TypeWelcome      = "welcome"       // server -> the client that joined
-	TypeError        = "error"         // server -> one client
-	TypeState        = "state"         // server -> all
-	TypePattern      = "pattern"       // player -> server
-	TypeDone         = "done"          // player -> server (compose)
-	TypePatterns     = "patterns"      // server -> tv
-	TypeCalibrated   = "calibrated"    // conductor -> server -> tv
-	TypeSelect       = "select"        // conductor -> server -> tv
-	TypeCue          = "cue"           // conductor -> server -> tv
-	TypeVolume       = "volume"        // conductor -> server -> tv
-	TypeCueScheduled = "cue_scheduled" // tv -> server
-	TypeBar          = "bar"           // tv -> server -> players
-	TypeHostAction   = "host_action"   // tv -> server
+	TypeCategories = "categories"
+	TypePick       = "pick"
+	TypeLeave      = "leave"
+	TypeKick       = "kick"
+	TypeKicked     = "kicked"
+	TypeJoin       = "join"        // any client -> server
+	TypeWelcome    = "welcome"     // server -> the client that joined
+	TypeError      = "error"       // server -> one client
+	TypeState      = "state"       // server -> all
+	TypePattern    = "pattern"     // player -> server
+	TypeDone       = "done"        // player -> server (compose)
+	TypePatterns   = "patterns"    // server -> tv
+	TypeCalibrated = "calibrated"  // conductor -> server -> tv
+	TypeSelect     = "select"      // conductor -> server -> tv
+	TypeCue        = "cue"         // conductor -> server -> tv
+	TypeVolume     = "volume"      // conductor -> server -> tv
+	TypeBar        = "bar"         // tv -> server -> players
+	TypeHostAction = "host_action" // tv -> server
 )
 
 // Roles. The conductor is not a role: it is the player whose seat equals
@@ -40,13 +39,6 @@ const (
 	PhaseCalibrate = "calibrate"
 	PhasePerform   = "perform"
 	PhaseResults   = "results"
-)
-
-// Cue actions.
-const (
-	CueIn     = "in"
-	CueOut    = "out"
-	CueAllOut = "all_out"
 )
 
 // Host actions.
@@ -126,7 +118,7 @@ type PlayerState struct {
 	Connected  bool   `json:"connected"`
 	Bot        bool   `json:"bot"`
 	NoteCount  int    `json:"noteCount"` // for the TV's compose tiles
-	Playing    bool   `json:"playing"`   // part is sounding (per the TV's cue_scheduled)
+	Level      int    `json:"level"`     // volume 0-100, set by the conductor's tilt
 	Done       bool   `json:"done"`      // tapped Done in compose; bots always are
 }
 
@@ -149,14 +141,15 @@ type ScoreSummary struct {
 	Total    int `json:"total"`
 }
 
-// CueTarget is one prompt on the conductor's chart. Kind says which gesture it wants:
-//   - flick: point at Seat and flick (cue Action) at At.
-//   - hold:  keep pointing at Seat from At until End. Scored by the share of that time aimed at Seat.
+// CueTarget is one note of the song on the conductor's chart: Seat's note
+// that starts at At (server Unix ms). Kind says which gesture it wants:
+//   - flick: point at Seat and flick at At. The TV plays the note.
+//   - hold:  a long note. Flick at At like a flick, then keep pointing at
+//     Seat until End. Scored by the flick and the share of that time aimed at Seat.
 type CueTarget struct {
 	ID     int    `json:"id"`
 	Kind   string `json:"kind"`
 	Seat   int    `json:"seat"`
-	Action string `json:"action,omitempty"` // flick only
 	At     int64  `json:"at"`
 	End    int64  `json:"end,omitempty"` // hold only
 	Result string `json:"result"`
@@ -175,6 +168,7 @@ type ScoreJudgment struct {
 }
 
 type RoundScoring struct {
+	Start   int64          `json:"start"` // server Unix ms perform began: step 0 of the song
 	Summary ScoreSummary   `json:"summary"`
 	Combo   int            `json:"combo"`
 	Targets []CueTarget    `json:"targets"`
@@ -202,8 +196,7 @@ type State struct {
 	Categories   []string             `json:"categories"`
 	Patterns     map[int]Grid         `json:"patterns"`
 	Notes        map[int][]Note       `json:"notes,omitempty"` // note-editor parts by seat; seats without notes are left out
-	Live         map[int]int          `json:"live"`
-	Winner       int                  `json:"winner"` // round with the most points (ties go to the earlier round), 0 = none yet
+	Winner       int                  `json:"winner"`          // round with the most points (ties go to the earlier round), 0 = none yet
 	Scoring      *RoundScoring        `json:"scoring,omitempty"`
 }
 
@@ -260,12 +253,12 @@ type Select struct {
 	Seat int `json:"seat"`
 }
 
-// Cue: bring a part in or cut it. The TV plays it on the next beat.
+// Cue: the conductor plays Seat's note. The TV plays that seat's note
+// nearest to now, if one is within ScoreHitWindowMS; the server scores it.
 type Cue struct {
 	Envelope
-	ID     string `json:"id"`
-	Seat   int    `json:"seat"`
-	Action string `json:"action"`
+	ID   string `json:"id"`
+	Seat int    `json:"seat"`
 }
 
 // Volume for one seat, 0-100. Max 10/s.
@@ -273,17 +266,6 @@ type Volume struct {
 	Envelope
 	Seat  int `json:"seat"`
 	Level int `json:"level"`
-}
-
-// CueScheduled: the TV reports the beat it actually played a cue on.
-// Beat 0 is when the TV starts the transport for perform. This is what
-// the replay log stores.
-type CueScheduled struct {
-	Envelope
-	ID     string `json:"id"`
-	Seat   int    `json:"seat"`
-	Action string `json:"action"`
-	Beat   int    `json:"beat"`
 }
 
 // Bar: sent by the TV once per bar, and relayed to every phone.

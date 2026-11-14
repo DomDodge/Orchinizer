@@ -12,8 +12,7 @@ let state = {
   game: null,
   selected: null, // seat the conductor is pointing at
   volumes: {}, // seat -> 0..100
-  playing: {}, // seat -> true; set by the audio engine when a cue actually lands
-  lastCue: null, // { seat, action, beat }
+  playing: {}, // seat -> true while a note the conductor played is sounding
   calibrated: [], // seats calibrated so far
   noteCounts: {}, // seat -> notes placed during compose (counts only, never the notes)
   hits: {}, // seat -> notes played so far (bumped via Tone.Draw); drives seat flashes
@@ -52,7 +51,7 @@ export function on(type, fn) {
 //     `notes` is set for phones using the note editor; audio/part.js reads either form.
 //   history = finished rounds [{ round, conductor, conductorName, key, tempo, points }]
 //   deadline = moved onto this machine's clock using serverTime, so a wrong TV clock doesn't matter
-//   serverOffset = Date.now() - server time, to place server-clock times (scoring targets) locally
+//   serverOffset = Date.now() - server time, to place server-clock times (scoring) locally
 function fromServerState(msg, prev) {
   const locked = msg.phase === 'calibrate' || msg.phase === 'perform'
   const patterns = msg.patterns || {}
@@ -101,7 +100,7 @@ export function handle(msg) {
         patch.phaseStartedAt = Date.now()
         patch.calibrated = []
         patch.selected = null
-        if (msg.phase === 'perform') Object.assign(patch, { playing: {}, volumes: {}, lastCue: null })
+        if (msg.phase === 'perform') Object.assign(patch, { playing: {}, volumes: {} })
       }
       patch.noteCounts = Object.fromEntries(game.players.map((p) => [p.seat, p.noteCount || 0]))
       break
@@ -134,11 +133,14 @@ export const setConnection = (connection) => set({ connection })
 export const setMuted = (muted) => set({ muted })
 export const setBeat = (beat) => set(beat % 4 === 0 ? { beat, bar: beat / 4 } : { beat })
 
-export function setCue(seat, action, beat) {
-  set({ playing: { ...state.playing, [seat]: action === 'in' }, lastCue: { seat, action, beat } })
+// A played note starts (on) or ends (off). Starting one also flashes the seat.
+export function notePlayed(seat, on) {
+  set(
+    on
+      ? { playing: { ...state.playing, [seat]: true }, hits: { ...state.hits, [seat]: (state.hits[seat] || 0) + 1 } }
+      : { playing: { ...state.playing, [seat]: false } },
+  )
 }
-export const setVolume = (seat, level) => set({ volumes: { ...state.volumes, [seat]: level } })
-export const bumpHit = (seat) => set({ hits: { ...state.hits, [seat]: (state.hits[seat] || 0) + 1 } })
 export const resetPlayback = () => set({ playing: {}, hits: {}, beat: -1, bar: -1 })
 
 export const playerBySeat = (seat) => state.game?.players?.find((p) => p.seat === seat)

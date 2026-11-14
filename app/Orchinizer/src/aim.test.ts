@@ -45,15 +45,6 @@ test('flick cues the seat selected before the swing, then cools down', () => {
   assert.equal(b.update({ t: 400, heading: 0, elevation: 10, accel: 20 }).filter((e) => e.type === 'flick').length, 1);
 });
 
-test('holding still pointing down for 1s fires allOut once', () => {
-  const b = createBaton(calib);
-  const down = (t: number) => b.update({ t, heading: 0, elevation: -80, accel: 0.2 }).filter((e) => e.type === 'allOut');
-  assert.equal(down(0).length, 0);
-  assert.equal(down(900).length, 0);
-  assert.equal(down(1000).length, 1);
-  assert.equal(down(1500).length, 0);
-});
-
 test('volume follows tilt, throttled to 10/s', () => {
   const b = createBaton(calib);
   const vol = (t: number, elevation: number) => b.update({ t, heading: 0, elevation, accel: 0.2 }).find((e) => e.type === 'volume');
