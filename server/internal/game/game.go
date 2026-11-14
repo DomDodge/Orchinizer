@@ -11,27 +11,17 @@ import (
 // Timings are the phase lengths. Calibrate is a cap: it normally ends as
 // soon as the conductor's phone sends calibrated.
 type Timings struct {
-	Compose, Calibrate, Perform, Vote time.Duration
+	Compose, Calibrate, Perform time.Duration
 	// MaxRounds caps the rounds in a game (0 = one per player). The first
 	// MaxRounds players in join order conduct. For the demo, e.g. 2.
 	MaxRounds int
-	// ReplayClip is how long the TV replays each performance during the vote.
-	// The vote lasts at least one clip per performance (plus a short pad), and
-	// everyone voting early doesn't cut the replays off.
-	ReplayClip time.Duration
 }
 
 var DefaultTimings = Timings{
 	Compose:   180 * time.Second,
 	Calibrate: 30 * time.Second,
 	Perform:   45 * time.Second,
-	Vote:      30 * time.Second,
-
-	ReplayClip: 10 * time.Second,
 }
-
-// replayPad is extra vote time after the last replay, to tap a vote.
-const replayPad = 5 * time.Second
 
 type keyTempo struct {
 	key   string
@@ -77,8 +67,6 @@ func (r *Room) advance() {
 	case protocol.PhasePerform:
 		r.finishPerformance()
 		r.nextRound()
-	case protocol.PhaseVote:
-		r.startResults()
 	case protocol.PhaseResults:
 		r.toLobby()
 	}
@@ -110,8 +98,8 @@ func (r *Room) onHostAction(c Client, action string) {
 			if r.phase == protocol.PhasePerform {
 				r.finishPerformance()
 			}
-			r.log.Info("host skipped to the vote", "round", r.round)
-			r.startVote()
+			r.log.Info("host skipped to the results", "round", r.round)
+			r.startResults()
 		default:
 			r.reject(c, "nothing to skip during "+r.phase)
 		}
@@ -182,7 +170,7 @@ func (r *Room) startGame() error {
 }
 
 // nextRound starts the next round whose conductor is connected, or the
-// vote when every player has had a turn.
+// results when every player has had a turn.
 func (r *Room) nextRound() {
 	for r.round < len(r.order) {
 		r.round++
@@ -193,7 +181,7 @@ func (r *Room) nextRound() {
 		}
 		r.log.Info("conductor not connected, skipping their round", "round", r.round, "seat", seat)
 	}
-	r.startVote()
+	r.startResults()
 }
 
 func (r *Room) startCompose(conductor int) {
@@ -261,7 +249,6 @@ func (r *Room) startCalibrate() {
 
 func (r *Room) startPerform() {
 	r.phase = protocol.PhasePerform
-	r.cueLog = nil
 	for _, p := range r.players {
 		p.playing = false
 	}
@@ -272,7 +259,7 @@ func (r *Room) startPerform() {
 	r.broadcastState()
 }
 
-// finishPerformance saves the round for replays and the vote.
+// finishPerformance saves the round's score.
 func (r *Room) finishPerformance() {
 	name := ""
 	if p := r.players[r.conductor]; p != nil {
@@ -283,107 +270,38 @@ func (r *Room) finishPerformance() {
 		summary := r.scorer.finish()
 		score = &summary
 	}
-	r.performances = append(r.performances, protocol.Performance{
+	r.performances = append(r.performances, protocol.PerformanceSummary{
 		Round: r.round, ConductorSeat: r.conductor, ConductorName: name,
-		Key: r.key, Tempo: r.tempo,
-		Parts: r.currentParts(),
-		Cues:  append([]protocol.LoggedCue{}, r.cueLog...),
-		Score: score,
+		Key: r.key, Tempo: r.tempo, Score: score,
 	})
-	r.cueLog = nil
 	for _, p := range r.players {
 		p.playing = false
 	}
 }
 
-func (r *Room) startVote() {
+// startResults shows the scores. The most points wins; a tie goes to the
+// earlier round. With no finished rounds it goes back to the lobby.
+func (r *Room) startResults() {
+	r.stopTimer()
 	r.conductor = 0
 	if len(r.performances) == 0 {
-		r.log.Info("no performances to vote on")
+		r.log.Info("no performances to score")
 		r.toLobby()
 		return
 	}
-	r.phase = protocol.PhaseVote
-	for _, p := range r.players {
-		p.vote = 0
-	}
-	r.voteMinEnd = time.Time{}
-	d := r.timings.Vote
-	if r.timings.ReplayClip > 0 {
-		replays := time.Duration(len(r.performances))*r.timings.ReplayClip + replayPad
-		r.voteMinEnd = time.Now().Add(replays)
-		d = max(d, replays)
-	}
-	r.setDeadline(d)
-	r.log.Info("vote", "performances", len(r.performances))
-	r.broadcastState()
-	r.sendPerformances()
-	r.maybeEndVote() // nobody may be able to vote (e.g. one player)
-}
-
-func (r *Room) onVote(c Client, p *player, round int) {
-	if r.phase != protocol.PhaseVote {
-		r.reject(c, "voting isn't open")
-		return
-	}
-	perf := r.performance(round)
-	if perf == nil {
-		r.reject(c, "no performance for that round")
-		return
-	}
-	if perf.ConductorSeat == p.seat {
-		r.reject(c, "you can't vote for a performance you conducted")
-		return
-	}
-	p.vote = round // changing your vote is fine; the last one counts
-	r.broadcastState()
-	r.maybeEndVote()
-}
-
-// maybeEndVote ends the vote early once every connected player who can
-// vote has voted.
-func (r *Room) maybeEndVote() {
-	if r.phase != protocol.PhaseVote {
-		return
-	}
-	for _, p := range r.players {
-		if p.bot || p.client == nil || p.vote != 0 {
-			continue
-		}
-		for _, perf := range r.performances {
-			if perf.ConductorSeat != p.seat {
-				return // p can still vote
-			}
-		}
-	}
-	// Everyone has voted. Finish now, unless the TV is still replaying: then
-	// pull the deadline in to the end of the replays.
-	if wait := time.Until(r.voteMinEnd); wait > 0 {
-		if r.deadline.Sub(r.voteMinEnd) > time.Second {
-			r.setDeadline(wait)
-			r.broadcastState()
-		}
-		return
-	}
-	r.stopTimer()
-	r.startResults()
-}
-
-func (r *Room) startResults() {
-	r.stopTimer()
 	r.phase = protocol.PhaseResults
 	r.winner = 0
-	bestPoints, bestVotes := -1, -1
-	for _, s := range r.summaries() { // in round order, so ties go to the earlier round
+	best := -1
+	for _, s := range r.performances { // in round order, so ties go to the earlier round
 		points := 0
 		if s.Score != nil {
 			points = s.Score.Points
 		}
-		if points > bestPoints || (points == bestPoints && s.Votes > bestVotes) {
-			bestPoints, bestVotes, r.winner = points, s.Votes, s.Round
+		if points > best {
+			best, r.winner = points, s.Round
 		}
 	}
-	r.log.Info("results", "winner", r.winner, "points", bestPoints, "votes", bestVotes)
+	r.log.Info("results", "winner", r.winner, "points", best)
 	r.broadcastState()
 }
 
@@ -396,7 +314,7 @@ func (r *Room) toLobby() {
 			delete(r.players, seat)
 			continue
 		}
-		p.vote, p.playing = 0, false
+		p.playing = false
 		p.steps, p.noteCount = protocol.Grid{}, 0
 		p.notes = nil
 		p.instrument = p.pick
@@ -407,35 +325,8 @@ func (r *Room) toLobby() {
 	r.round, r.conductor, r.order = 0, 0, nil
 	r.locked = false
 	r.key, r.tempo = "C", 100
-	r.cueLog, r.performances, r.winner = nil, nil, 0
+	r.performances, r.winner = nil, 0
 	r.log.Info("lobby")
 	r.broadcastState()
 	r.sendPatterns()
-}
-
-func (r *Room) summaries() []protocol.PerformanceSummary {
-	out := make([]protocol.PerformanceSummary, 0, len(r.performances))
-	for _, perf := range r.performances {
-		votes := 0
-		for _, p := range r.players {
-			if p.vote == perf.Round {
-				votes++
-			}
-		}
-		out = append(out, protocol.PerformanceSummary{
-			Round: perf.Round, ConductorSeat: perf.ConductorSeat,
-			ConductorName: perf.ConductorName, Key: perf.Key, Tempo: perf.Tempo, Votes: votes,
-			Score: perf.Score,
-		})
-	}
-	return out
-}
-
-func (r *Room) performance(round int) *protocol.Performance {
-	for i := range r.performances {
-		if r.performances[i].Round == round {
-			return &r.performances[i]
-		}
-	}
-	return nil
 }

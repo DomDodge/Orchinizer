@@ -3,8 +3,10 @@ import Stage from '../stage/Stage.jsx'
 import NoteLanes from '../stage/NoteLanes.jsx'
 import CountdownRing from './CountdownRing.jsx'
 import Icon from './Icon.jsx'
+import { seatPos, SEAT_R } from '../stage/layout.js'
 import './screens.css'
 
+const GRADE = { perfect: 'Perfect!', good: 'Good', miss: 'Miss', early: 'Too early' }
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '')
 
 export default function Perform() {
@@ -36,6 +38,9 @@ export default function Perform() {
   })
 
   const cuePlayer = lastCue && players.find((p) => p.seat === lastCue.seat)
+  const scoring = game.scoring
+  const last = scoring?.last
+  const lastTarget = last && scoring.targets.find((t) => t.id === last.targetId)
 
   return (
     <Stage seats={seats} beam={selected} under={
@@ -51,6 +56,12 @@ export default function Perform() {
           <b style={{ color: conductor?.color }}>{conductor?.name}</b>&nbsp;is conducting
         </span>
         <span className="perf-spacer" />
+        {scoring && (
+          <span className="chip perf-chip perf-score">
+            Score <b className="num">{scoring.summary.points}</b>
+            {scoring.combo > 1 && <span className="perf-combo">combo {scoring.combo}</span>}
+          </span>
+        )}
         <span className="chip perf-chip">Key of {game.key}</span>
         <span className="chip perf-chip">{game.tempo} BPM</span>
         <span className="chip perf-chip perf-bar">
@@ -61,6 +72,18 @@ export default function Perform() {
         </span>
         <CountdownRing deadline={game.deadline} size={88} />
       </div>
+
+      {lastTarget && (
+        // Re-keyed per judgment so the pop-in replays; the animation fades it out.
+        <div
+          key={`${last.targetId}-${last.result}-${last.at}`}
+          className={`perf-grade ${last.result}`}
+          style={{ left: seatPos(lastTarget.seat).x, top: seatPos(lastTarget.seat).y - SEAT_R - 24 }}
+        >
+          {GRADE[last.result]}
+          {last.points > 0 && ` +${last.points}`}
+        </div>
+      )}
 
       {cuePlayer && (
         // Re-keyed per cue so the fade-in replays.

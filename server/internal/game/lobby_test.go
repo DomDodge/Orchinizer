@@ -146,8 +146,12 @@ func TestCueAckIsMatchedAndCountedOnce(t *testing.T) {
 	}
 	ack.ID = "real"
 	send(r, tv, ack)
-	send(r, tv, ack)
-	if !r.players[2].playing || len(r.cueLog) != 1 {
-		t.Fatal("valid cue wasn't logged exactly once")
+	if !r.players[2].playing {
+		t.Fatal("valid cue wasn't applied")
+	}
+	r.players[2].playing = false
+	send(r, tv, ack) // a repeat is dropped
+	if r.players[2].playing {
+		t.Fatal("repeated acknowledgement was applied twice")
 	}
 }

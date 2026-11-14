@@ -17,5 +17,5 @@ export const scoreAccuracy = (score: ScoreSummary) => score.total ? Math.round((
 
 /** Same tie-breaks as the server; never reorder or mutate the received state. */
 export function rankPerformances(performances: PerformanceSummary[]) {
-  return [...performances].sort((a, b) => (b.score?.points ?? 0) - (a.score?.points ?? 0) || b.votes - a.votes || a.round - b.round);
+  return [...performances].sort((a, b) => (b.score?.points ?? 0) - (a.score?.points ?? 0) || a.round - b.round);
 }

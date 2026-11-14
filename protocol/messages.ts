@@ -2,7 +2,7 @@
 // Change both together and announce it in the group chat.
 
 export type Role = "tv" | "player";
-export type Phase = "lobby" | "compose" | "calibrate" | "perform" | "vote" | "results";
+export type Phase = "lobby" | "compose" | "calibrate" | "perform" | "results";
 export type CueAction = "in" | "out";
 export type HostActionKind = "start" | "next" | "skip" | "restart";
 export type ErrorCode =
@@ -62,7 +62,6 @@ export interface PlayerState {
   bot: boolean;
   noteCount: number;
   playing: boolean;
-  voted: boolean;
 }
 
 export interface PerformanceSummary {
@@ -71,7 +70,6 @@ export interface PerformanceSummary {
   conductorName: string;
   key: string;
   tempo: number;
-  votes: number;
   score?: ScoreSummary;
 }
 
@@ -132,7 +130,7 @@ export interface State extends Base {
   /** Note-editor parts by seat. Seats without notes are left out. */
   notes?: Record<string, Note[]>;
   live: Record<string, number>;
-  winner: number; // winning round, 0 = none
+  winner: number; // round with the most points (ties go to the earlier round), 0 = none
   scoring?: RoundScoring;
 }
 
@@ -201,38 +199,9 @@ export interface Bar extends Base {
   tempo: number;
 }
 
-export interface Vote extends Base {
-  type: "vote";
-  round: number;
-}
-
 export interface HostAction extends Base {
   type: "host_action";
   action: HostActionKind;
-}
-
-export interface LoggedCue {
-  id: string;
-  seat: number;
-  action: CueAction;
-  beat: number;
-}
-
-export interface Performance {
-  round: number;
-  conductorSeat: number;
-  conductorName: string;
-  key: string;
-  tempo: number;
-  parts: Part[];
-  cues: LoggedCue[];
-  score?: ScoreSummary;
-}
-
-/** To the TV when the vote starts: everything needed for replays. */
-export interface Performances extends Base {
-  type: "performances";
-  list: Performance[];
 }
 
 export type ServerMessage =
@@ -245,7 +214,6 @@ export type ServerMessage =
   | Cue
   | Volume
   | Bar
-  | Performances
   | Kicked;
 
 export type ClientMessage =
@@ -257,7 +225,6 @@ export type ClientMessage =
   | Volume
   | CueScheduled
   | Bar
-  | Vote
   | HostAction
   | AllOut
   | Categories

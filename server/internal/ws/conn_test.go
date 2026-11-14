@@ -162,7 +162,7 @@ func TestReconnectAndErrors(t *testing.T) {
 
 	// Message before join.
 	y := dial(t, url)
-	y.send(protocol.Vote{Envelope: protocol.Envelope{Type: "vote"}, Round: 1})
+	y.send(protocol.Select{Envelope: protocol.Envelope{Type: "select"}, Seat: 1})
 	y.expect("error", &e)
 	if e.Code != protocol.ErrBadMessage {
 		t.Fatalf("error %+v", e)

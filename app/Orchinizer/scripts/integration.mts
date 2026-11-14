@@ -13,7 +13,7 @@ const source = ts.transpileModule(readFileSync(new URL('../src/net.ts', import.m
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
-test('phone lobby → token reconnect → two conductor rounds → voting → restart', { timeout: 120000 }, async () => {
+test('phone lobby → token reconnect → two conductor rounds → scores → restart', { timeout: 120000 }, async () => {
   const binary = join(mkdtempSync(join(tmpdir(), 'orchinizer-integration-')), 'server');
   execFileSync('go', ['build', '-o', binary, './cmd/server'], { cwd: new URL('../../../server/', import.meta.url) });
   const reserve = createServer(); reserve.listen(0, '127.0.0.1'); await once(reserve, 'listening');
@@ -111,13 +111,12 @@ test('phone lobby → token reconnect → two conductor rounds → voting → re
     await guest.wait(s => s.state.phase === 'perform');
     assert.equal(guest.api.useNet().state.scoring.summary.points, 0);
     guest.api.send({ type: 'cue', id: 'in-2', seat: initial.seat, action: 'in' }); await host.wait(s => s.state.live[initial.seat] === 80);
-    next(); await host.wait(s => s.state.phase === 'vote'); await guest.wait(s => s.state.phase === 'vote');
+    next(); await host.wait(s => s.state.phase === 'results'); await guest.wait(s => s.state.phase === 'results');
     assert.equal(host.api.useNet().state.performances.length, 2);
     assert.equal(host.api.useNet().state.performances[0].score.points, earned);
     assert.equal(host.api.useNet().state.performances[0].score.perfect + host.api.useNet().state.performances[0].score.good + host.api.useNet().state.performances[0].score.misses, host.api.useNet().state.performances[0].score.total);
-    host.api.send({ type: 'vote', round: 2 }); guest.api.send({ type: 'vote', round: 1 });
-    // The TV replays both performances before the server closes voting (25 seconds).
-    await host.wait(s => s.state.phase === 'results', 35000); assert.equal(host.api.useNet().state.winner, 1);
+    const [r1, r2] = host.api.useNet().state.performances;
+    assert.equal(host.api.useNet().state.winner, r2.score.points > r1.score.points ? 2 : 1);
     host.api.send({ type: 'host_action', action: 'restart' }); await host.wait(s => s.state.phase === 'lobby' && s.state.players.length === 2);
     assert.equal(host.api.useNet().state.scoring, undefined);
     const online = phone('Online', room); await online.wait(s => !!s.state);

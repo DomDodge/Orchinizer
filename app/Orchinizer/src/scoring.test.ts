@@ -33,11 +33,11 @@ test('combo display matches bonus thresholds and cap; final accuracy counts miss
   assert.equal(scoreAccuracy({ ...summary, total: 0 }), 0);
 });
 
-test('leaderboard uses points, then votes, then earlier round without changing state', () => {
-  const performance = (round: number, points: number, votes: number): PerformanceSummary => ({
-    round, conductorSeat: round, conductorName: `Player ${round}`, key: 'C', tempo: 100, votes, score: { ...summary, points },
+test('leaderboard uses points, then earlier round without changing state', () => {
+  const performance = (round: number, points: number): PerformanceSummary => ({
+    round, conductorSeat: round, conductorName: `Player ${round}`, key: 'C', tempo: 100, score: { ...summary, points },
   });
-  const performances = [performance(3, 100, 9), performance(4, 600, 1), performance(2, 600, 2), performance(1, 600, 2)];
+  const performances = [performance(3, 100), performance(4, 600), performance(2, 600), performance(1, 600)];
   assert.deepEqual(rankPerformances(performances).map(p => p.round), [1, 2, 4, 3]);
   assert.deepEqual(performances.map(p => p.round), [3, 4, 2, 1]);
 });

@@ -60,17 +60,6 @@ func (r *Room) onMessage(c Client, typ string, raw []byte) {
 		}
 		r.onHostAction(c, m.Action)
 
-	case protocol.TypeVote:
-		if p == nil {
-			r.reject(c, "only players vote")
-			return
-		}
-		var m protocol.Vote
-		if !r.decode(c, raw, &m) {
-			return
-		}
-		r.onVote(c, p, m.Round)
-
 	case protocol.TypeJoin:
 		r.reject(c, "already joined")
 
@@ -301,9 +290,6 @@ func (r *Room) onCueScheduled(c Client, raw []byte) {
 		return
 	}
 	delete(r.pending, m.ID)
-	if r.phase == protocol.PhasePerform {
-		r.cueLog = append(r.cueLog, protocol.LoggedCue{ID: m.ID, Seat: m.Seat, Action: m.Action, Beat: m.Beat})
-	}
 	r.players[m.Seat].playing = m.Action == protocol.CueIn
 	r.broadcastState()
 }
