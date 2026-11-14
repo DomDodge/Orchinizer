@@ -81,7 +81,7 @@ export function createMockServer(deliver) {
       later(700 * (i + 1), () => {
         players.push({
           seat: i + 1, name, color: SEAT_COLORS[i], instrument: INSTRUMENTS[i],
-          connected: true, bot: false, noteCount: 0, playing: false,
+          connected: true, bot: false, noteCount: 0, level: 80,
         })
         pushState()
       }),
@@ -122,37 +122,33 @@ export function createMockServer(deliver) {
   }
 
   function perform() {
-    // A chart shaped like the server's: a prompt every bar after one beat of lead-in,
-    // seats in turn, each alternating in/out, every 4th a 3-beat hold.
-    const beatMs = 60000 / s.tempo
+    // The chart, like the server's: every note of the song, in order, on its seat; notes
+    // 4+ steps long are holds. Notes too late to judge before perform ends are left off.
+    const stepMs = 60000 / s.tempo / 4
     const start = Date.now()
+    const end = start + LEN.perform * MOCK_SPEED
     const seats = performers().map((p) => p.seat)
+    const song = Object.entries(notes)
+      .flatMap(([seat, ns]) => ns.map((n) => ({ seat: Number(seat), ...n })))
+      .sort((a, b) => a.start - b.start || a.seat - b.seat)
     const targets = []
-    const on = {}
-    for (let i = 0, beat = 4; seats.length && (beat + 4) * beatMs < LEN.perform * MOCK_SPEED; i++, beat += 4) {
-      const seat = seats[i % seats.length]
-      const at = start + beat * beatMs
-      if (i % 4 === 3) targets.push({ id: i, kind: 'hold', seat, at, end: at + 3 * beatMs, result: 'pending' })
-      else {
-        on[seat] = !on[seat]
-        targets.push({ id: i, kind: 'flick', seat, action: on[seat] ? 'in' : 'out', at, result: 'pending' })
-      }
+    for (const n of song) {
+      const at = start + n.start * stepMs
+      if (at + 300 >= end) break
+      const t = { id: targets.length + 1, kind: 'flick', seat: n.seat, at, result: 'pending' }
+      if (n.length >= 4) Object.assign(t, { kind: 'hold', end: Math.min(at + n.length * stepMs, end) })
+      targets.push(t)
     }
-    s.scoring = { summary: { points: 0, maxCombo: 0, perfect: 0, good: 0, misses: 0, total: targets.length }, combo: 0, targets }
+    s.scoring = { start, summary: { points: 0, maxCombo: 0, perfect: 0, good: 0, misses: 0, total: targets.length }, combo: 0, targets }
     phase('perform', LEN.perform)
-    const playing = new Set()
-    const cue = (seat, action) => {
-      action === 'in' ? playing.add(seat) : playing.delete(seat)
-      emit('cue', { id: `m${++cueId}`, seat, action })
-    }
-    // The fake conductor hits most prompts (real ms: the music doesn't speed up). Grades are
+    // The fake conductor plays most notes (real ms: the music doesn't speed up). Grades are
     // a dice roll; the real server judges cue arrival times. No combo multiplier here.
     const sum = s.scoring.summary
     for (const t of targets) {
       const roll = Math.random()
+      if (roll >= 0.2) timers.push(setTimeout(() => emit('cue', { id: `m${++cueId}`, seat: t.seat }), t.at - start))
       timers.push(
         setTimeout(() => {
-          if (t.kind === 'flick' && roll >= 0.2) cue(t.seat, t.action)
           t.result = roll < 0.2 ? 'miss' : roll < 0.65 ? 'perfect' : 'good'
           const points = { perfect: 100, good: 50, miss: 0 }[t.result]
           s.scoring.combo = t.result === 'miss' ? 0 : s.scoring.combo + 1
@@ -169,7 +165,7 @@ export function createMockServer(deliver) {
     every(100, () => {
       if (Math.random() < 0.03) pointed = pick(seats)
       emit('select', { seat: pointed })
-      if (playing.has(pointed) && Math.random() < 0.5) {
+      if (Math.random() < 0.2) {
         level[pointed] = Math.max(10, Math.min(100, level[pointed] + rand(21) - 10))
         emit('volume', { seat: pointed, level: level[pointed] })
       }

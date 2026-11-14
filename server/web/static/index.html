@@ -44,7 +44,7 @@
 <script>
   const $ = (id) => document.getElementById(id);
   const log = (s) => { $("log").textContent = s + "\n" + $("log").textContent.slice(0, 20000); };
-  let ws, offset = 0, state = null, beat = 0, cues = [];
+  let ws, offset = 0, state = null, beat = 0;
   const send = (m) => { ws && ws.readyState === 1 && ws.send(JSON.stringify(m)); };
 
   fetch("/config").then(r => r.json()).then(c => {
@@ -59,20 +59,16 @@
       const m = JSON.parse(e.data);
       if (m.type === "welcome") { $("room").hidden = false; $("code").textContent = m.room; $("create").hidden = true; }
       if (m.type === "state") { state = m; offset = m.serverTime - Date.now(); render(); return; }
-      // Act like the TV: report every cue as played on the next beat.
-      if (m.type === "cue") cues.push(m);
       if (m.type !== "select" && m.type !== "volume") log("← " + e.data);
     };
   };
   document.querySelectorAll("[data-host]").forEach(b => b.onclick = () => send({ type: "host_action", action: b.dataset.host }));
   $("send").onclick = () => { const v = $("msg").value; ws && ws.send(v); log("→ " + v); };
 
-  // The beat clock: bar messages for the phones, cue_scheduled for cues.
+  // The beat clock: bar messages for the phones.
   (function tick() {
     const tempo = (state && state.tempo) || 100;
     if (ws && ws.readyState === 1) {
-      for (const c of cues) send({ type: "cue_scheduled", id: c.id, seat: c.seat, action: c.action, beat });
-      cues = [];
       if (beat % 4 === 0) send({ type: "bar", bar: beat / 4, tempo });
       beat++;
     }
@@ -91,7 +87,7 @@
     $("players").innerHTML = s.players.map(p => `<tr>
       <td><span class="dot" style="background:${p.color}"></span> ${p.seat}</td>
       <td>${esc(p.name)}${p.bot ? " (bot)" : ""}</td><td>${p.instrument || (p.seat === s.conductor ? "conducting" : "")}</td>
-      <td>${p.noteCount}</td><td>${p.connected ? "" : "disconnected "}${p.playing ? "▶ playing" : ""}</td></tr>`).join("");
+      <td>${p.noteCount}</td><td>${p.connected ? "" : "disconnected "}vol ${p.level}</td></tr>`).join("");
   }
   setInterval(() => state && render(), 1000);
   function esc(s) { return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }

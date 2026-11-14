@@ -226,26 +226,6 @@
   font-size: 26px;
   min-width: 2ch;
 }
-.perf-cue {
-  position: absolute;
-  left: 50%;
-  bottom: 28px;
-  translate: -50% 0;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  font-size: 26px;
-  padding: 14px 24px;
-  border-radius: 999px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  animation: perf-cue-in 0.2s ease-out;
-}
-.perf-cue-dot {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-}
 .perf-score b {
   font-size: 30px;
   color: var(--accent);
@@ -289,12 +269,6 @@
   100% {
     opacity: 0;
     transform: translateY(-36px);
-  }
-}
-@keyframes perf-cue-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
   }
 }
 
