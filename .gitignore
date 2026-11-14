@@ -5,3 +5,7 @@ dist/
 expo-env.d.ts
 .DS_Store
 *.log
+
+# Full-quality instrument recordings (about 150 MB). scripts/import-sounds.mjs turns them into the
+# small .m4a files in assets/sounds/ and tv/public/sounds/, which are committed.
+/app/Orchinizer/sound-sources/

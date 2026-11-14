@@ -1,18 +1,25 @@
-// Synth sounds, one recipe per instrument. engine.js only depends on the interface below.
+// Instrument sounds. engine.js only depends on the interface below.
+//
+// Every instrument plays its own recordings (from Logic, imported by
+// app/Orchinizer/scripts/import-sounds.mjs into tv/public/sounds/): one file per note, so each
+// note is heard exactly as recorded. loadSamples() fetches them once audio is unlocked. Until an
+// instrument's files have loaded (or if they fail to), it falls back to a synth recipe below.
+//
+//   await loadSamples()   start fetching every instrument's recordings (engine.unlock calls it)
 //
 //   const inst = create(instrument, destination, { key })
 //     instrument   the server's instrument id, e.g. 'violin' (see /protocol INSTRUMENT_GROUPS).
 //                  Unknown ids get the piano.
 //     destination  Tone.js node to connect your output to (the engine's master bus).
-//     key          the round's key as a note name, e.g. 'C', 'Bb'.
+//     key          the round's key, e.g. 'C', 'Bb'. Unused: rows are fixed pitches.
 //
 //   inst.play(row, time, duration?)
-//     row       0-4, the row of one note (0 = lowest).
+//     row       0..NOTE_ROWS-1: semitones above the instrument's C (chromatic, C up to the G#
+//               above the next C), the same rows as the phone's note editor.
 //     time      exact AudioContext time to sound the note. Always pass it through to
 //               triggerAttack*/start(); never play "now", or it drifts off the beat.
 //     duration  seconds the note is held (a stretched note is longer). Omitted for old grid
-//               parts: held instruments then play an 8th note. Plucked instruments ring out
-//               on their own and ignore it.
+//               parts: an 8th note. Plucked synth fallbacks ring out on their own.
 //
 //   inst.setVolume(level, time?)
 //     level 0-100 from the conductor. `time` is when the change should be heard
@@ -22,17 +29,53 @@
 //     free every node; called when the performance ends.
 //
 // Each player gets their own instance, so two of the same instrument never share state.
-// Pitch: the five rows are the major pentatonic of the round's key; see `notesFor`.
-// The phone's preview samples (app/Orchinizer/scripts/gen-sounds.mjs) mimic these recipes and
-// use the same octaves, so keep the two in step when changing a sound.
 import * as Tone from 'tone'
+import { SAMPLED } from './samples.gen.js'
 
-const PENTATONIC = [0, 2, 4, 7, 9] // semitones above the root; row n plays PENTATONIC[n]
+export const NOTE_ROWS = 21 // /protocol NOTE_ROWS
 
-export function notesFor(key, octave) {
-  const root = Tone.Frequency(`${key}${octave}`).toMidi()
-  return PENTATONIC.map((i) => Tone.Frequency(root + i, 'midi').toNote())
+// The octave of each instrument's row 0 (a C), in scientific pitch (middle C = C4). Matches the
+// phone's INSTRUMENTS[id].octave and the recordings.
+const OCTAVES = {
+  violin: 5, viola: 4, cello: 3, contrabass: 2, guitar: 3,
+  flute: 5, clarinet: 4, sax: 4, trumpet: 4, trombone: 3, tuba: 2,
+  piano: 4, organ: 3, synth: 4,
 }
+
+/** Note names for rows 0..NOTE_ROWS-1, chromatic from C in `octave`. */
+export function rangeFor(octave) {
+  const root = Tone.Frequency(`C${octave}`).toMidi()
+  return Array.from({ length: NOTE_ROWS }, (_, n) => Tone.Frequency(root + n, 'midi').toNote())
+}
+
+// ---- recordings ----
+
+const BASE = import.meta.env?.BASE_URL ?? '/'
+const recordings = {} // id -> ToneAudioBuffer per row, once loaded
+let loading = null
+
+export function loadSamples() {
+  loading ??= Promise.all(
+    SAMPLED.map((id) =>
+      Promise.all(Array.from({ length: NOTE_ROWS }, (_, n) => Tone.ToneAudioBuffer.fromUrl(`${BASE}sounds/${id}_${n}.m4a`)))
+        .then((list) => (recordings[id] = list))
+        .catch((e) => console.warn(`[audio] ${id} recordings didn't load; it will use a synth`, e)),
+    ),
+  )
+  return loading
+}
+
+// A recorded instrument: every row has its own file, so the Sampler never retunes.
+function sampled(destination, id) {
+  const range = rangeFor(OCTAVES[id] ?? 4)
+  const sampler = new Tone.Sampler({ urls: Object.fromEntries(range.map((note, n) => [note, recordings[id][n]])), release: 0.25 })
+  return instrument(destination, sampler, [sampler], (row, time, duration) => {
+    if (!range[row]) return
+    sampler.triggerAttackRelease(range[row], Math.max(duration ?? Tone.Time('8n').toSeconds(), 0.08), time)
+  })
+}
+
+// ---- synth fallbacks ----
 
 // Shared plumbing: every instrument ends in one gain node, so setVolume works the same everywhere.
 // `nodes` are disposed with it; `out` is the node that feeds the gain.
@@ -48,22 +91,23 @@ function instrument(destination, out, nodes, play) {
 
 // A held instrument: a PolySynth through optional effects, sustained for the note's duration.
 function held(destination, key, octave, voice, options, effects = []) {
-  const notes = notesFor(key, octave)
+  const notes = rangeFor(octave)
   const synth = new Tone.PolySynth(voice, options)
   const chain = [synth, ...effects]
   for (let i = 0; i < chain.length - 1; i++) chain[i].connect(chain[i + 1])
   return instrument(destination, chain[chain.length - 1], chain, (row, time, duration) =>
-    synth.triggerAttackRelease(notes[row], Math.max(duration ?? Tone.Time('8n').toSeconds(), 0.08), time),
+    notes[row] && synth.triggerAttackRelease(notes[row], Math.max(duration ?? Tone.Time('8n').toSeconds(), 0.08), time),
   )
 }
 
 // A plucked string. PluckSynth is monophonic, so a few take turns.
 function plucked(destination, key, octave, options) {
-  const notes = notesFor(key, octave)
+  const notes = rangeFor(octave)
   const out = new Tone.Gain(1)
   const voices = Array.from({ length: 4 }, () => new Tone.PluckSynth(options).connect(out))
   let next = 0
   return instrument(destination, out, [out, ...voices], (row, time) => {
+    if (!notes[row]) return
     voices[next].triggerAttack(notes[row], time)
     next = (next + 1) % voices.length
   })
@@ -140,5 +184,6 @@ const RECIPES = {
 }
 
 export function create(instrumentId, destination, { key }) {
-  return (RECIPES[instrumentId] || RECIPES.piano)(destination, key)
+  const id = RECIPES[instrumentId] ? instrumentId : 'piano'
+  return recordings[id] ? sampled(destination, id) : RECIPES[id](destination, key)
 }

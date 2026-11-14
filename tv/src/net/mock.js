@@ -6,7 +6,7 @@ import { MOCK_SPEED, SEAT_COLORS } from '../config.js'
 
 const NAMES = ['Maya', 'Theo', 'Priya', 'Jonas', 'Lena', 'Kofi']
 const INSTRUMENTS = ['contrabass', 'cello', 'viola', 'violin', 'guitar', 'flute']
-const KEYS = [['C', 96], ['G', 104], ['F', 88], ['D', 112], ['A', 100], ['Bb', 108]]
+const KEYS = [['C', 100], ['G', 100], ['F', 100], ['D', 100], ['A', 100], ['Bb', 100]] // always 100 bpm: the backing drum loop's tempo
 const ROUNDS = Number(new URLSearchParams(location.search).get('rounds')) || 3
 
 // Base phase lengths in ms (scaled by ?speed=).
@@ -21,7 +21,7 @@ function randomNotes(index, count) {
   const notes = []
   for (let slot = index; slot * 8 < 256 && notes.length < 16; slot += count) {
     if (Math.random() < 0.3) continue
-    notes.push({ id: `n${slot}`, row: rand(5), start: slot * 8, length: 1 + rand(7) })
+    notes.push({ id: `n${slot}`, row: rand(21), start: slot * 8, length: 1 + rand(7) })
   }
   return notes
 }

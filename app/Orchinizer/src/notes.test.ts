@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LOOP_STEPS, MAX_NOTE_STEPS, MAX_NOTES, MIN_GAP_STEPS, ROWS, type Note } from '../../../protocol/messages.ts';
+import { LOOP_STEPS, MAX_NOTE_STEPS, MAX_NOTES, MIN_GAP_STEPS, NOTE_ROWS, type Note } from '../../../protocol/messages.ts';
 import { conflict, fits, move, place, remove, resize } from './notes.ts';
 
 const n = (id: string, row: number, start: number, length: number): Note => ({ id, row, start, length });
@@ -21,7 +21,7 @@ test('place refuses a taken spot, a full budget, a bad row and a reused id', () 
   assert.deepEqual(place([n('b', 1, 0, 4)], 3, 4, 'a')?.at(-1), n('a', 3, 4, 4)); // right after b: notes may touch
   const full = Array.from({ length: MAX_NOTES }, (_, i) => n(`n${i}`, 0, i * 8, 1));
   assert.equal(place(full, 0, LOOP_STEPS - 1, 'x'), null);
-  assert.equal(place([], ROWS, 0, 'a'), null);
+  assert.equal(place([], NOTE_ROWS, 0, 'a'), null);
   assert.equal(place([], -1, 0, 'a'), null);
   assert.equal(place([n('a', 0, 0, 1)], 3, 8, 'a'), null);
 });
@@ -56,7 +56,7 @@ test('move changes time and pitch, but not near another note or off the staff', 
   const notes = [n('a', 0, 0, 4), n('b', 1, 20, 4)];
   assert.deepEqual(move(notes, 'a', 2, 12)[0], n('a', 2, 12, 4));
   assert.equal(move(notes, 'a', 3, 18), notes); // onto b, even on another row
-  assert.equal(move(notes, 'a', ROWS, 0), notes);
+  assert.equal(move(notes, 'a', NOTE_ROWS, 0), notes);
   assert.equal(move(notes, 'a', 0, LOOP_STEPS - 3), notes); // would run past the song
   assert.deepEqual(move(notes, 'a', 0, 0), notes); // a note doesn't collide with itself
   assert.equal(move(notes, 'a', 0, 40, [n('t', 0, 42, 2)]), notes); // onto another player's note

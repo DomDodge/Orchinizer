@@ -25,7 +25,7 @@ export function Compose({ state, me }: { state: State; me: Player }) {
     .flatMap((p) => (state.notes?.[p.seat] ?? []).map((n) => ({ ...n, seat: p.seat, owner: p.name, color: p.color })));
   const instrumentOf = (seat: number) => state.players.find((p) => p.seat === seat)?.instrument || inst;
 
-  useEffect(() => preload(inst, state.key), [inst, state.key]);
+  useEffect(() => preload(inst), [inst]);
 
   // The server refused a change: go back to the last part it accepted and say why.
   const serverNotes = state.notes?.[me.seat];
@@ -58,13 +58,13 @@ export function Compose({ state, me }: { state: State; me: Player }) {
     let s = 0;
     const tick = () => {
       setStep(s);
-      for (const { n, inst: i } of song.current) if (n.start === s) playNoteFor(i, state.key, n.row, n.length * stepMs);
+      for (const { n, inst: i } of song.current) if (n.start === s) playNoteFor(i, n.row, n.length * stepMs);
       s = (s + 1) % LOOP_STEPS;
     };
     tick();
     const id = setInterval(tick, stepMs);
     return () => clearInterval(id);
-  }, [playing, stepMs, state.key]);
+  }, [playing, stepMs]);
 
   const onChange = (next: Note[]) => {
     setNotes(next);
@@ -86,9 +86,10 @@ export function Compose({ state, me }: { state: State; me: Player }) {
         notes={notes}
         onChange={onChange}
         color={me.color}
+        instrument={inst}
         keyName={state.key}
         disabled={left === 0}
-        onPlace={(n) => playNoteFor(inst, state.key, n.row, n.length * stepMs)}
+        onPlace={(n) => playNoteFor(inst, n.row, n.length * stepMs)}
         playhead={playing ? step : -1}
         others={others}
       />

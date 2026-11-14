@@ -9,8 +9,18 @@ import { send } from '../net/socket.js'
 import * as instruments from './instruments.js' // only via play / setVolume / dispose
 import { partNotes, STEPS_PER_BEAT } from './part.js'
 import lobbyMusicUrl from './music/lobby.mp3'
+import drumBeatUrl from './music/drum_beat.m4a'
 
 const HIT_WINDOW_MS = 300 // /protocol ScoreHitWindowMS
+
+// The backing track: a drum loop under every performance, recorded as BACKING_BARS bars of 4/4 at
+// BACKING_BPM (the server's round tempo). It runs on the Transport from step 0, so it stays on
+// the song's beat, even when the TV joins mid-song.
+const BACKING_BPM = 100
+const BACKING_BARS = 2
+const BACKING_DB = -6 // under the instruments
+let backingBuffer = null // loaded once audio is unlocked
+let backing = null // this performance's Player
 
 if (import.meta.env.DEV) window.Tone = Tone // for poking at the Transport from devtools
 
@@ -28,6 +38,8 @@ export function unlock() {
   return Tone.start().then(() => {
     master = new Tone.Gain(store.getState().muted ? 0 : 1)
     master.chain(new Tone.Limiter(-1), Tone.getDestination())
+    instruments.loadSamples() // in the background: performances start minutes later
+    backingBuffer = new Tone.ToneAudioBuffer(drumBeatUrl)
   })
 }
 
@@ -74,6 +86,18 @@ function load(p) {
     }
   }
 
+  if (backingBuffer?.loaded) {
+    backing = new Tone.Player({
+      url: backingBuffer,
+      loop: true,
+      // Loop on the bar line, not the file's end: compressed audio can pad the end slightly.
+      loopEnd: (BACKING_BARS * 4 * 60) / BACKING_BPM,
+      playbackRate: p.tempo / BACKING_BPM, // the server always sends BACKING_BPM; this only guards
+      volume: BACKING_DB,
+    }).connect(master)
+    backing.sync().start(0)
+  }
+
   // Beat clock: drives beat dots / pulse and the per-bar message to phones.
   T.scheduleRepeat((time) => {
     const beat = Math.round(T.getTicksAtTime(time) / T.PPQ)
@@ -87,6 +111,8 @@ function load(p) {
 function teardown() {
   T.stop()
   T.cancel(0)
+  backing?.unsync().dispose()
+  backing = null
   Object.values(voices).forEach((v) => Object.values(v.insts).forEach((i) => i.dispose()))
   voices = {}
   store.resetPlayback()

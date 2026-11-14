@@ -3,7 +3,7 @@
 // Everyone writes on one shared sheet (the song). `notes` is this player's part; `others` is every other
 // player's notes, which this player's notes must fit around. The song is monophonic: no two notes overlap,
 // on any row. Notes may touch: MIN_GAP_STEPS of rest (currently 0) separate one note's end from the next start.
-import { LOOP_STEPS, MAX_NOTE_STEPS, MAX_NOTES, MIN_GAP_STEPS, ROWS, type Note } from '../../../protocol/messages.ts';
+import { LOOP_STEPS, MAX_NOTE_STEPS, MAX_NOTES, MIN_GAP_STEPS, NOTE_ROWS, type Note } from '../../../protocol/messages.ts';
 
 /** Whether a and b clash: overlapping, or (if MIN_GAP_STEPS > 0) without that much rest between them. */
 const tooClose = (a: Note, b: Note) =>
@@ -13,7 +13,7 @@ const tooClose = (a: Note, b: Note) =>
 function inBounds(n: Note) {
   return (
     Number.isInteger(n.row) && Number.isInteger(n.start) && Number.isInteger(n.length) &&
-    n.row >= 0 && n.row < ROWS &&
+    n.row >= 0 && n.row < NOTE_ROWS &&
     n.start >= 0 && n.length >= 1 && n.length <= MAX_NOTE_STEPS && n.start + n.length <= LOOP_STEPS
   );
 }

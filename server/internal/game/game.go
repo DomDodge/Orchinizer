@@ -28,10 +28,14 @@ type keyTempo struct {
 	tempo int
 }
 
+// roundTempo is every round's tempo: the TV's backing drum loop is recorded
+// at this speed (2 bars of 4/4), so the song has to match it.
+const roundTempo = 100
+
 // roundKeys: each game shuffles these and plays one per round.
 var roundKeys = []keyTempo{
-	{"C", 96}, {"G", 104}, {"F", 88}, {"D", 112},
-	{"A", 100}, {"E", 92}, {"Bb", 108}, {"Eb", 84},
+	{"C", roundTempo}, {"G", roundTempo}, {"F", roundTempo}, {"D", roundTempo},
+	{"A", roundTempo}, {"E", roundTempo}, {"Bb", roundTempo}, {"Eb", roundTempo},
 }
 
 // ---- timers ----
@@ -234,7 +238,7 @@ func (r *Room) startCalibrate() {
 	rng := rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))
 	for _, p := range r.seatOrder() {
 		if p.seat != r.conductor && p.noteCount == 0 && p.instrument != "" {
-			p.notes = fillNotes(r.sheetExcept(p), p.instrument, autoNotes, rng)
+			p.notes = fillNotes(r.sheetExcept(p), r.key, autoNotes, rng)
 			p.noteCount = len(p.notes)
 		}
 	}

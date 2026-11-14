@@ -36,7 +36,7 @@ func validateNotes(notes []protocol.Note, allowed []string, others []sheetNote) 
 			return fmt.Sprintf("note %d has a bad id", i)
 		case ids[n.ID]:
 			return fmt.Sprintf("note id %q is used twice", n.ID)
-		case n.Row < 0 || n.Row >= protocol.Rows:
+		case n.Row < 0 || n.Row >= protocol.NoteRows:
 			return fmt.Sprintf("note %q is off the staff", n.ID)
 		case n.Length > protocol.MaxNoteSteps:
 			return fmt.Sprintf("Notes can be at most %d steps long", protocol.MaxNoteSteps)
@@ -90,21 +90,23 @@ const autoNotes = 8
 
 // fillNotes writes up to want notes for a seat into the free space of the
 // sheet, so bots and players who wrote nothing still have a part. Notes land
-// on beats and keep every sheet rule; fewer are written if the sheet is full.
-func fillNotes(sheet []sheetNote, instrument string, want int, rng *rand.Rand) []protocol.Note {
-	rows := protocol.Rows
+// on beats, keep every sheet rule, and use the round key's pentatonic scale
+// (the editor's rows are chromatic, so random rows would clash); fewer are
+// written if the sheet is full.
+func fillNotes(sheet []sheetNote, key string, want int, rng *rand.Rand) []protocol.Note {
+	rows := scaleRows(key)
 	var out []protocol.Note
 	starts := rng.Perm(protocol.LoopSteps / protocol.StepsPerBeat)
-	row := rng.IntN(rows)
+	degree := rng.IntN(len(rows))
 	for _, beat := range starts {
 		if len(out) == want {
 			break
 		}
-		// A gentle melody: step up or down one row at a time.
-		row = min(rows-1, max(0, row+rng.IntN(3)-1))
+		// A gentle melody: step up or down one scale degree at a time.
+		degree = min(len(rows)-1, max(0, degree+rng.IntN(3)-1))
 		n := protocol.Note{
 			ID:     fmt.Sprintf("auto-%d", len(out)),
-			Row:    row,
+			Row:    rows[degree],
 			Start:  beat * protocol.StepsPerBeat,
 			Length: 2 * (1 + rng.IntN(2)), // an 8th or a quarter
 		}
@@ -119,3 +121,23 @@ func fillNotes(sheet []sheetNote, instrument string, want int, rng *rand.Rand) [
 	return out
 }
 
+// keyRoots: semitones above C for each key a round can be in.
+var keyRoots = map[string]int{
+	"C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3, "E": 4, "F": 5,
+	"F#": 6, "Gb": 6, "G": 7, "G#": 8, "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11,
+}
+
+// scaleRows is every note-editor row (semitones above the instrument's C) in
+// key's major pentatonic scale, lowest first. An unknown key counts as C.
+func scaleRows(key string) []int {
+	root := keyRoots[key]
+	var rows []int
+	for row := 0; row < protocol.NoteRows; row++ {
+		for _, degree := range protocol.MajorPentatonic {
+			if (row-root-degree)%12 == 0 {
+				rows = append(rows, row)
+			}
+		}
+	}
+	return rows
+}

@@ -60,11 +60,15 @@ const (
 	ErrBadPattern     = "bad_pattern" // a note-editor part broke a rule; the previous part stays
 )
 
-// Grid sizes. Row 0 is the lowest note of the round's scale.
+// Grid sizes (the old one-bar sequencer). Row 0 is the lowest note of the round's scale.
 const (
 	Rows  = 5
 	Steps = 8
 )
+
+// NoteRows is the note editor's range: chromatic, row n is n semitones above
+// the instrument's C (C up to the G# above the next C).
+const NoteRows = 21
 
 // Grid is a pattern: Grid[row][step].
 type Grid [Rows][Steps]bool
@@ -223,7 +227,7 @@ type Part struct {
 // per beat), so they follow the round's tempo.
 type Note struct {
 	ID         string `json:"id"`                   // unique within the part
-	Row        int    `json:"row"`                  // 0 = lowest note of the scale
+	Row        int    `json:"row"`                  // semitones above the instrument's C, 0..NoteRows-1
 	Start      int    `json:"start"`                // step, 0..LoopSteps-1
 	Length     int    `json:"length"`               // steps, 1..MaxNoteSteps; start+length <= LoopSteps
 	Instrument string `json:"instrument,omitempty"` // "" = the player's instrument

@@ -274,7 +274,7 @@ func (b *bot) randomNotes() []protocol.Note {
 		start := slot * slotSteps
 		notes = append(notes, protocol.Note{
 			ID:     fmt.Sprintf("n%d", start),
-			Row:    rand.IntN(protocol.Rows),
+			Row:    rand.IntN(protocol.NoteRows),
 			Start:  start,
 			Length: 1 + rand.IntN(slotSteps-protocol.MinGapSteps),
 		})

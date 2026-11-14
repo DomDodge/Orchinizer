@@ -1,25 +1,22 @@
 // Phone audio is Preview only (the TV plays the show), so keep it quiet.
-// Each instrument has its own samples (scripts/gen-sounds.mjs), voiced like its TV synth.
+// Every instrument has a recording of each note-editor row (scripts/import-sounds.mjs), so each
+// note plays its own file at its recorded pitch.
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
-import { keyRoot, SCALE } from './protocol';
-import { SAMPLE_STEP, SOUNDS } from './sounds.gen';
+import { NOTE_ROWS } from './protocol';
+import { SOUNDS } from './sounds.gen';
 
 const PREVIEW_VOLUME = 0.5;
 
-type Sound = { id: string; source: number; rate: number };
+type Sound = { id: string; source: number };
 
-/**
- * The bundled sample for a row and the playback rate that tunes it. Tonal samples are SAMPLE_STEP
- * semitones apart, so the rate stays within a few semitones of 1. Unknown instruments use the piano.
- */
-function soundFor(instrument: string, key: string, row: number): Sound | null {
-  const bank = SOUNDS[instrument] ?? SOUNDS.piano;
-  const semitone = keyRoot(key) + SCALE[row];
-  const i = Math.min(bank.length - 1, Math.floor(semitone / SAMPLE_STEP));
-  return { id: `${instrument}:${semitone}`, source: bank[i], rate: 2 ** ((semitone - i * SAMPLE_STEP) / 12) };
+/** The recording for a row (semitones above the instrument's C). Unknown instruments use the piano. */
+function soundFor(instrument: string, row: number): Sound | null {
+  const id = SOUNDS[instrument] ? instrument : 'piano';
+  const source = SOUNDS[id]?.[row];
+  return source == null ? null : { id: `${id}:${row}`, source };
 }
 
-// One player per pitch, so two rows tuned from the same sample can sound together.
+// One player per note, so different notes can sound together.
 const players = new Map<string, AudioPlayer>();
 
 function player(sound: Sound) {
@@ -43,10 +40,10 @@ function ensureAudioMode() {
 }
 
 /** Create the players for an instrument up front so the first tap isn't late. */
-export function preload(instrument: string, key: string) {
+export function preload(instrument: string) {
   ensureAudioMode();
-  for (let r = 0; r < SCALE.length; r++) {
-    const s = soundFor(instrument, key, r);
+  for (let r = 0; r < NOTE_ROWS; r++) {
+    const s = soundFor(instrument, r);
     if (s) player(s);
   }
 }
@@ -54,19 +51,19 @@ export function preload(instrument: string, key: string) {
 /** Pending stops from playNoteFor, by sound, so a replay of the same sound isn't cut short. */
 const stops = new Map<string, ReturnType<typeof setTimeout>>();
 
-/** Play a note for `ms` milliseconds, then stop it (a stretched note). Samples shorter than that end early. */
-export function playNoteFor(instrument: string, key: string, row: number, ms: number) {
-  const s = soundFor(instrument, key, row);
+/** Play a note for `ms` milliseconds, then stop it (a stretched note). Recordings shorter than that end early. */
+export function playNoteFor(instrument: string, row: number, ms: number) {
+  const s = soundFor(instrument, row);
   if (!s) return;
-  playNote(instrument, key, row);
+  playNote(instrument, row);
   stops.set(s.id, setTimeout(() => {
     stops.delete(s.id);
     player(s).pause();
   }, ms));
 }
 
-export function playNote(instrument: string, key: string, row: number) {
-  const s = soundFor(instrument, key, row);
+export function playNote(instrument: string, row: number) {
+  const s = soundFor(instrument, row);
   if (!s) return;
   ensureAudioMode();
   const pending = stops.get(s.id);
@@ -75,9 +72,8 @@ export function playNote(instrument: string, key: string, row: number) {
     stops.delete(s.id);
   }
   const p = player(s);
-  // Don't set p.playbackRate: on iOS (Expo Go, SDK 58) setting a non-integer rate hangs the app,
-  // which froze the compose screen on the first note. Previews play the nearest sample below the
-  // note at its recorded pitch (up to SAMPLE_STEP - 1 semitones flat); the TV plays the real thing.
+  // Never set p.playbackRate: on iOS (Expo Go, SDK 58) setting a non-integer rate hangs the app.
+  // There's no need: every note has its own recording.
   p.seekTo(0);
   p.play();
 }

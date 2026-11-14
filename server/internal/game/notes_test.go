@@ -1,6 +1,8 @@
 package game
 
 import (
+	"fmt"
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -26,7 +28,7 @@ func TestValidateNotes(t *testing.T) {
 	allowed := []string{"violin", "cello"}
 	tooMany := []protocol.Note{}
 	for i := 0; i <= protocol.MaxNotes; i++ {
-		tooMany = append(tooMany, note(strings.Repeat("n", i+1), i%protocol.Rows, (i/protocol.Rows)*4, 1))
+		tooMany = append(tooMany, note(strings.Repeat("n", i+1), i%protocol.NoteRows, (i/protocol.NoteRows)*4, 1))
 	}
 	cases := []struct {
 		name  string
@@ -47,7 +49,7 @@ func TestValidateNotes(t *testing.T) {
 		{"long id", []protocol.Note{note(strings.Repeat("x", maxNoteIDLen+1), 0, 0, 1)}, "bad id"},
 		{"duplicate id", []protocol.Note{note("a", 0, 0, 1), note("a", 1, 0, 1)}, "used twice"},
 		{"row below", []protocol.Note{note("a", -1, 0, 1)}, "off the staff"},
-		{"row above", []protocol.Note{note("a", protocol.Rows, 0, 1)}, "off the staff"},
+		{"row above", []protocol.Note{note("a", protocol.NoteRows, 0, 1)}, "off the staff"},
 		{"negative start", []protocol.Note{note("a", 0, -1, 2)}, "doesn't fit"},
 		{"zero length", []protocol.Note{note("a", 0, 0, 0)}, "doesn't fit"},
 		{"past the loop", []protocol.Note{note("a", 0, protocol.LoopSteps-2, 3)}, "doesn't fit"},
@@ -279,7 +281,7 @@ func TestBadPatternCode(t *testing.T) {
 	r := newTestRoom()
 	joinTV(r)
 	bob := joinPlayer(r, "Bob")
-	notesMsg(r, bob, []protocol.Note{note("a", 9, 0, 1)}) // lobby accepts patterns for testing
+	notesMsg(r, bob, []protocol.Note{note("a", protocol.NoteRows, 0, 1)}) // off the staff; lobby accepts patterns for testing
 	var e protocol.Error
 	if !bob.last(protocol.TypeError, &e) || e.Code != protocol.ErrBadPattern {
 		t.Fatalf("want %s, got %+v", protocol.ErrBadPattern, e)
@@ -310,5 +312,29 @@ func TestPatternBurstIsCoalescedNotDropped(t *testing.T) {
 	}
 	if got := tv.state(t).Notes[1]; len(got) != 1 || got[0].Length != 4 {
 		t.Fatalf("flush sent %+v, want the length-4 note", got)
+	}
+}
+
+func TestFilledNotesStayInTheKeyAndRange(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	for _, key := range []string{"C", "G", "F", "D", "A", "E", "Bb", "Eb"} {
+		inKey := map[int]bool{}
+		for _, row := range scaleRows(key) {
+			inKey[row] = true
+		}
+		notes := fillNotes(nil, key, autoNotes, rng)
+		if len(notes) != autoNotes {
+			t.Fatalf("%s: want %d notes, got %d", key, autoNotes, len(notes))
+		}
+		for _, n := range notes {
+			if n.Row < 0 || n.Row >= protocol.NoteRows || !inKey[n.Row] {
+				t.Fatalf("%s: row %d is out of the key or the range", key, n.Row)
+			}
+		}
+	}
+	// Bb: Bb, C, D, F, G and their octaves within C..G#.
+	want := []int{0, 2, 5, 7, 10, 12, 14, 17, 19}
+	if got := scaleRows("Bb"); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("Bb rows: want %v, got %v", want, got)
 	}
 }

@@ -10,6 +10,7 @@
 // flash ring, which the engine fires through Tone.Draw.
 import { useEffect, useRef } from 'react'
 import { timeline, seatNotes } from '../audio/engine.js'
+import { NOTE_ROWS } from '../audio/instruments.js'
 import { getState } from '../state/store.js'
 import { STEPS_PER_BEAT } from '../audio/part.js'
 import { seatPos, SEAT_R, LANE_TOP } from './layout.js'
@@ -18,7 +19,7 @@ const PX_PER_EIGHTH = 56
 const PX_PER_STEP = PX_PER_EIGHTH / 2 // steps are 16th notes
 const R = 10 // note head radius
 const LANE_W = 96
-const ROW_GAP = 16 // horizontal offset per pitch row
+const ROW_GAP = (LANE_W - 2 * R - 12) / (NOTE_ROWS - 1) // horizontal offset per pitch row: low notes left, high right
 const FADE = 70 // px over which notes fade in at the top
 
 const MISS_AFTER_MS = 300 // /protocol ScoreHitWindowMS: later than this can't be played
@@ -52,7 +53,7 @@ function draw(ctx) {
       const alpha = Math.min(1, (y - LANE_TOP) / FADE)
       if (alpha <= 0) continue
       const missed = !n.played && now - n.start > missSteps
-      const x = laneX + (n.row - 2) * ROW_GAP
+      const x = laneX + (n.row - (NOTE_ROWS - 1) / 2) * ROW_GAP
       const tail = Math.max(0, n.length * PX_PER_STEP - 2 * R - 4)
       const top = Math.max(LANE_TOP, y - R - tail)
       ctx.beginPath()

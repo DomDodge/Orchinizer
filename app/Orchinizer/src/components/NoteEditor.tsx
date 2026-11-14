@@ -4,18 +4,21 @@
 // touches into calls to it.
 // Touch handling is plain React Native: one Pressable per grid cell for taps (so no tap coordinates are
 // needed, which differ by platform), responder props for dragging notes.
+// Rows are chromatic, NOTE_ROWS of them from the instrument's C, too many to fit: the grid scrolls
+// vertically, and stops scrolling while a finger is on a note so a drag moves the note.
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
-import { type GestureResponderEvent, type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
-import { LOOP_STEPS, MAX_NOTES, ROWS, STEPS_PER_BEAT, type Note } from '../../../../protocol/messages.ts';
+import { type GestureResponderEvent, type LayoutChangeEvent, Pressable, ScrollView, type ScrollViewInstance, StyleSheet, Text, View } from 'react-native';
+import { LOOP_STEPS, MAX_NOTES, NOTE_ROWS, STEPS_PER_BEAT, type Note } from '../../../../protocol/messages.ts';
 import { conflict, fits, move, place, remove, resize } from '../notes';
-import { noteName } from '../protocol';
+import { inKey, isSharp, noteLabel } from '../protocol';
 import { DIM, FG } from './ui';
 
 const BAR_STEPS = STEPS_PER_BEAT * 4; // one bar of 4/4 on screen at a time
 const BARS = LOOP_STEPS / BAR_STEPS;
-const ROW_H = 52;
-const LABEL_W = 40;
+const ROW_H = 44;
+const VISIBLE_ROWS = 8; // the rest scroll
+const LABEL_W = 44;
 const HANDLE_W = 22; // touch area on a note's right edge for stretching
 const HOLD_MS = 450; // hold a note still this long to delete it
 const MOVE_SLOP = 6; // px the finger must travel before a hold becomes a drag
@@ -33,15 +36,16 @@ type Props = {
   /** Called once per finished gesture with the new part. Not called if nothing changed. */
   onChange: (next: Note[]) => void;
   color: string;
+  /** Whose recordings the rows are: labels show its notes, e.g. C5 for a violin's row 0. */
+  instrument: string;
+  /** The round's key: rows in its scale get bright labels, a hint at what sounds good together. */
   keyName: string;
   /** Locks the editor, e.g. when the compose timer runs out. */
   disabled?: boolean;
   /** For an audio preview when a note is placed, moved or stretched. */
   onPlace?: (note: Note) => void;
-  /** How many rows to show, from row 0 up. At most ROWS. */
+  /** How many rows to show, from row 0 up. At most NOTE_ROWS. */
   rows?: number;
-  /** Row names, indexed by row. Defaults to the note names in keyName. */
-  rowLabels?: string[];
   /** Step the preview is playing (0..LOOP_STEPS-1), or -1 for none. The view follows it. */
   playhead?: number;
   /** Every other player's notes. Mine must fit around them. */
@@ -52,23 +56,38 @@ export function NoteEditor({
   notes,
   onChange,
   color,
+  instrument,
   keyName,
   disabled = false,
   onPlace,
-  rows = ROWS,
-  rowLabels,
+  rows = NOTE_ROWS,
   playhead = -1,
   others = [],
 }: Props) {
   const [picked, setBar] = useState(0);
   const [width, setWidth] = useState(0);
   const [hint, setHint] = useState<string | null>(null);
+  // A finger on a note stops the grid scrolling, so dragging a note up or down moves the note.
+  const [holding, setHolding] = useState(false);
+  const scroller = useRef<ScrollViewInstance>(null);
+  const scrolled = useRef(false);
   // While the preview plays, the view follows it; otherwise it shows the bar the player picked.
   const bar = playhead >= 0 ? Math.floor(playhead / BAR_STEPS) : picked;
   const cellW = width / BAR_STEPS;
   const offset = bar * BAR_STEPS;
   const full = notes.length >= MAX_NOTES;
   const inView = (n: Note) => n.start < offset + BAR_STEPS && n.start + n.length > offset;
+  const label = (row: number) => noteLabel(instrument, row);
+
+  // Open on the player's notes, or the middle of the range.
+  const viewH = Math.min(rows, VISIBLE_ROWS) * ROW_H;
+  const centerOnce = () => {
+    if (scrolled.current) return;
+    scrolled.current = true;
+    const mid = notes.length ? notes.reduce((sum, n) => sum + n.row, 0) / notes.length : (rows - 1) / 2;
+    const y = (rows - 1 - mid) * ROW_H + ROW_H / 2 - viewH / 2;
+    scroller.current?.scrollTo({ y: Math.max(0, Math.min(y, rows * ROW_H - viewH)), animated: false });
+  };
 
   useEffect(() => {
     if (!hint) return;
@@ -117,25 +136,35 @@ export function NoteEditor({
       </View>
       <SongMap notes={notes} others={others} color={color} bar={bar} onPick={setBar} />
 
+      <ScrollView
+        ref={scroller}
+        style={{ height: viewH }}
+        scrollEnabled={!holding}
+        nestedScrollEnabled
+        onLayout={centerOnce}
+      >
       <View style={styles.roll}>
         <View style={{ width: LABEL_W }}>
-          {Array.from({ length: rows }, (_, i) => (
-            <Text key={i} style={styles.label}>
-              {rowLabels?.[rows - 1 - i] ?? noteName(keyName, rows - 1 - i)}
-            </Text>
-          ))}
+          {Array.from({ length: rows }, (_, i) => {
+            const row = rows - 1 - i;
+            return (
+              <Text key={i} style={[styles.label, isSharp(row) && styles.labelSharp, inKey(keyName, row) && styles.labelInKey]}>
+                {label(row)}
+              </Text>
+            );
+          })}
         </View>
 
         <View style={[styles.grid, { height: ROW_H * rows }]} onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
           {/* The cells: rows top (highest note) to bottom, every beat shaded so notes are easy to line up. */}
           <View style={StyleSheet.absoluteFill}>
             {Array.from({ length: rows }, (_, i) => (
-              <View key={i} style={[styles.row, i % 2 === 1 && styles.rowAlt]}>
+              <View key={i} style={[styles.row, isSharp(rows - 1 - i) && styles.rowSharp, (rows - 1 - i) % 12 === 0 && styles.rowC]}>
                 {Array.from({ length: BAR_STEPS }, (_, s) => (
                   <Pressable
                     key={s}
                     accessibilityRole="button"
-                    accessibilityLabel={`Add ${rowLabels?.[rows - 1 - i] ?? noteName(keyName, rows - 1 - i)}, bar ${bar + 1}, step ${s + 1}`}
+                    accessibilityLabel={`Add ${label(rows - 1 - i)}, bar ${bar + 1}, step ${s + 1}`}
                     disabled={disabled}
                     onPress={() => addNote(rows - 1 - i, offset + s)}
                     style={[styles.step, s % STEPS_PER_BEAT === 0 && styles.beat]}
@@ -172,6 +201,7 @@ export function NoteEditor({
                   disabled={disabled}
                   commit={commit}
                   onPlace={onPlace}
+                  onHold={setHolding}
                   rows={rows}
                   others={others}
                 />
@@ -181,9 +211,10 @@ export function NoteEditor({
           )}
         </View>
       </View>
+      </ScrollView>
 
       <Text style={[styles.hint, hint && styles.hintWarn]}>
-        {hint ?? 'Tap to add · drag to move · drag the right edge to stretch · hold to delete'}
+        {hint ?? 'Tap to add · drag to move · drag the right edge to stretch · hold to delete · scroll for higher and lower notes'}
       </Text>
     </View>
   );
@@ -211,6 +242,7 @@ function NoteView({
   disabled,
   commit,
   onPlace,
+  onHold,
   rows,
   others,
 }: {
@@ -222,6 +254,8 @@ function NoteView({
   disabled: boolean;
   commit: (next: Note[]) => void;
   onPlace?: (note: Note) => void;
+  /** True while a finger is on this note, false when it lifts: the grid doesn't scroll meanwhile. */
+  onHold: (holding: boolean) => void;
   rows: number;
   others: SheetNote[];
 }) {
@@ -261,6 +295,7 @@ function NoteView({
   const grant = (kind: Drag['kind'], e: GestureResponderEvent) => {
     const t: Touch = { kind, x0: e.nativeEvent.pageX, y0: e.nativeEvent.pageY, dragging: false, deleted: false };
     touch.current = t;
+    onHold(true);
     // Holding the body still deletes the note; the stretch handle only stretches.
     if (kind === 'move') {
       holdTimer.current = setTimeout(() => {
@@ -285,6 +320,7 @@ function NoteView({
 
   const release = () => {
     clearHold();
+    onHold(false);
     const t = touch.current;
     touch.current = null;
     if (t?.dragging && !t.deleted) finish();
@@ -292,6 +328,7 @@ function NoteView({
 
   const terminate = () => {
     clearHold();
+    onHold(false);
     touch.current = null;
     setDrag(null);
   };
@@ -353,7 +390,7 @@ function SongMap({ notes, others, color, bar, onPick }: { notes: Note[]; others:
                   {
                     left: `${((n.start % BAR_STEPS) / BAR_STEPS) * 100}%`,
                     width: `${(Math.min(n.length, BAR_STEPS - (n.start % BAR_STEPS)) / BAR_STEPS) * 100}%`,
-                    bottom: `${(n.row / ROWS) * 100}%`,
+                    bottom: `${(n.row / NOTE_ROWS) * 100}%`,
                     backgroundColor: c,
                     opacity: mine ? 1 : 0.7,
                   },
@@ -382,11 +419,14 @@ const styles = StyleSheet.create({
   owner: { color: '#0B0B12', fontSize: 11, fontWeight: '800' },
   count: { marginLeft: 'auto', color: FG, fontWeight: '800' },
   roll: { flexDirection: 'row' },
-  label: { height: ROW_H, lineHeight: ROW_H, color: DIM, fontWeight: '700', fontSize: 14 },
+  label: { height: ROW_H, lineHeight: ROW_H, color: DIM, fontWeight: '600', fontSize: 13, paddingLeft: 4 },
+  labelSharp: { backgroundColor: '#101018' },
+  labelInKey: { color: FG, fontWeight: '800' },
   grid: { flex: 1, overflow: 'hidden', borderRadius: 8 },
   playhead: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: '#FFFFFF' },
-  row: { height: ROW_H, flexDirection: 'row', backgroundColor: '#15151F' },
-  rowAlt: { backgroundColor: '#1A1A27' },
+  row: { height: ROW_H, flexDirection: 'row', backgroundColor: '#1A1A27' },
+  rowSharp: { backgroundColor: '#12121B' }, // like a keyboard's black keys
+  rowC: { borderBottomWidth: 2, borderColor: '#3A3A55' }, // the bottom of each octave
   step: { flex: 1, borderLeftWidth: StyleSheet.hairlineWidth, borderColor: '#26263A' },
   beat: { borderLeftWidth: 2, borderColor: '#33334A' },
   note: { position: 'absolute', height: ROW_H - 6, marginTop: 3, borderRadius: 8 },

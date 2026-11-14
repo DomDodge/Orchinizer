@@ -14,7 +14,9 @@ export type ErrorCode =
 
 export const ROWS = 5;
 export const STEPS = 8;
-/** grid[row][step]. Row 0 is the lowest note of the round's scale. 5 x 8. */
+/** Note-editor rows: chromatic, row n = n semitones above the instrument's C (C up to the G# above the next C). */
+export const NOTE_ROWS = 21;
+/** grid[row][step] (the old one-bar sequencer). Row 0 is the lowest note of the round's scale. 5 x 8. */
 export type Grid = boolean[][];
 
 interface Base {
@@ -260,7 +262,7 @@ export const MIN_GAP_STEPS = 0;   // rest required between notes (any players): 
 
 export interface Note {
   id: string;
-  row: number;     // 0 = lowest note in the scale
+  row: number;     // semitones above the instrument's C, 0..NOTE_ROWS-1
   start: number;   // step
   length: number;  // steps
   instrument?: string;
