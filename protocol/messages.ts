@@ -206,7 +206,8 @@ export type ServerMessage =
   | Cue
   | Volume
   | Bar
-  | Kicked;
+  | Kicked
+  | Pong;
 
 export type ClientMessage =
   | Join
@@ -220,7 +221,8 @@ export type ClientMessage =
   | Categories
   | Pick
   | Leave
-  | Kick;
+  | Kick
+  | Ping;
 
 /** GET https://<host>/config (plain HTTP JSON): what the TV's QR code should open. */
 export interface ServerConfig {
@@ -234,6 +236,9 @@ export interface Pick extends Base { type: "pick"; instrument: string | null }
 export interface Leave extends Base { type: "leave" }
 export interface Kick extends Base { type: "kick"; seat: number }
 export interface Kicked extends Base { type: "kicked" }
+/** Keepalive: the server answers every ping with a pong, so a client can tell a live socket from a dead one. */
+export interface Ping extends Base { type: "ping" }
+export interface Pong extends Base { type: "pong" }
 export const INSTRUMENT_GROUPS: Record<Category, string[]> = {
   strings: ["contrabass", "cello", "viola", "violin", "harp", "guitar"],
   wind: ["flute", "clarinet", "sax", "trumpet", "trombone", "tuba"],
@@ -252,7 +257,7 @@ export const STEPS_PER_BEAT = 4;  // 16th notes
 export const LOOP_STEPS = 256;    // 16 bars: the shared song everyone composes on
 export const MAX_NOTES = 16;      // per player
 export const MAX_NOTE_STEPS = 8;  // longest note: half a bar
-export const MIN_GAP_STEPS = 1;   // rest between consecutive notes on the sheet (any players)
+export const MIN_GAP_STEPS = 0;   // rest required between notes (any players): none, notes may touch
 
 export interface Note {
   id: string;

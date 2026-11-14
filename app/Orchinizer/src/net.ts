@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import { AppState } from 'react-native';
 import type { ClientMsg, ServerMsg, State } from './protocol';
 
 // Set this to the game server's WebSocket endpoint when starting Expo.
@@ -28,6 +29,35 @@ const rejectListeners = new Set<(message: string) => void>();
 export const onPatternRejected = (f: (message: string) => void) => (rejectListeners.add(f), () => void rejectListeners.delete(f));
 
 let ws: WebSocket | null = null;
+
+// Keepalive. A locked or backgrounded phone can lose its socket without onclose ever firing, which
+// left players stuck on an old screen (e.g. compose after the round moved on). So we ping every
+// PING_MS; the server answers every ping, and any message counts as a sign of life. Silence for
+// DEAD_MS means the socket is dead: drop it and rejoin with the seat token.
+export const PING_MS = 5000;
+export const DEAD_MS = 15000;
+let lastHeard = 0;
+let keepalive: ReturnType<typeof setInterval> | null = null;
+
+/** Pings a live socket, or replaces one that has gone quiet. Runs every PING_MS and when the app returns to the foreground. */
+export function checkAlive(now = Date.now()) {
+  if (!join || !ws) return; // not in a room, or a reconnect is already pending
+  if (now - lastHeard > DEAD_MS && (snap.state || join.token)) {
+    const dead = ws;
+    ws = null; // its handlers ignore everything from here on
+    dead.close();
+    set({ connected: false });
+    open();
+    return;
+  }
+  send({ type: 'ping' });
+}
+
+function startKeepalive() {
+  if (keepalive) return;
+  keepalive = setInterval(() => checkAlive(), PING_MS);
+  AppState.addEventListener('change', (s) => s === 'active' && checkAlive());
+}
 let join: { name: string; room: string; token?: string } | null = null; // room '' = host
 
 /** No room = host a new one. */
@@ -52,6 +82,8 @@ function open() {
   }
   let welcomed = false;
   ws = sock;
+  lastHeard = Date.now(); // give a new socket the full DEAD_MS to open
+  startKeepalive();
   sock.onopen = () => {
     if (ws !== sock) return;
     set({ connected: true });
@@ -59,6 +91,7 @@ function open() {
   };
   sock.onmessage = (e) => {
     if (ws !== sock) return;
+    lastHeard = Date.now();
     const m: ServerMsg = JSON.parse(String(e.data));
     if (m.type === 'state') {
       offset = m.serverTime - Date.now();

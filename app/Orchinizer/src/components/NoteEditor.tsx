@@ -90,7 +90,7 @@ export function NoteEditor({
       // Say why: the 1-step note place() tried last is the smallest one that could have fit.
       const blocker = conflict(notes, { id, row, start, length: 1 }, others);
       const owner = others.find((o) => o === blocker)?.owner;
-      setHint(owner ? `That spot is taken by ${owner}` : 'Leave a little rest between notes');
+      setHint(owner ? `That spot is taken by ${owner}` : 'That spot already has one of your notes');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
