@@ -37,8 +37,10 @@ export function startMotion(): Promise<boolean> {
   starting = (async () => {
     try {
       if (!await DeviceMotion.isAvailableAsync()) return false;
-      const { granted } = await DeviceMotion.requestPermissionsAsync();
-      if (!granted) return false;
+      // No permission check on purpose. On iOS, expo-sensors' "motion permission" is the step counter's
+      // (CMPedometer: Settings > Privacy > Motion & Fitness); device motion itself streams without it.
+      // Gating on it hid the calibration step on phones with Motion & Fitness off or denied. If no
+      // readings ever arrive, the calibration screen says so and offers button controls.
       DeviceMotion.setUpdateInterval(16);
       DeviceMotion.addListener(onMotion);
       subscribed = true;

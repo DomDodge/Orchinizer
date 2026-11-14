@@ -36,6 +36,23 @@ var roundKeys = []keyTempo{
 
 // ---- timers ----
 
+// conductorWait is how long calibrate waits for an offline conductor to come back before
+// starting the song without them. Phones drop whenever a screen locks.
+const conductorWait = 60 * time.Second
+
+// calibrateClock starts calibration's countdown, or, while the conductor is offline, a longer
+// wait for them: calibration needs the conductor's phone, so it shouldn't run out without them.
+func (r *Room) calibrateClock() {
+	p := r.players[r.conductor]
+	r.waitingForConductor = p == nil || !p.connected()
+	if r.waitingForConductor {
+		r.log.Info("calibrate waiting for the conductor to reconnect", "round", r.round, "seat", r.conductor)
+		r.setDeadline(conductorWait)
+		return
+	}
+	r.setDeadline(r.timings.Calibrate)
+}
+
 func (r *Room) setDeadline(d time.Duration) {
 	r.stopTimer()
 	r.deadline = time.Now().Add(d)
@@ -62,7 +79,7 @@ func (r *Room) advance() {
 	case protocol.PhaseCompose:
 		r.startCalibrate()
 	case protocol.PhaseCalibrate:
-		r.log.Info("calibrate timed out or skipped", "round", r.round)
+		r.log.Info("calibrate timed out or skipped", "round", r.round, "conductorOffline", r.waitingForConductor)
 		r.startPerform()
 	case protocol.PhasePerform:
 		r.finishPerformance()
@@ -195,7 +212,7 @@ func (r *Room) startCompose(conductor int) {
 	// Human picks persist. Bots fill unclaimed active instruments each round.
 	used := map[string]bool{}
 	for _, p := range r.seatOrder() {
-		p.level = 80
+		p.level, p.done = 80, false
 		p.steps, p.noteCount = protocol.Grid{}, 0
 		p.notes = nil
 		if !p.bot {
@@ -240,7 +257,7 @@ func (r *Room) startCalibrate() {
 	}
 	r.locked = true
 	r.phase = protocol.PhaseCalibrate
-	r.setDeadline(r.timings.Calibrate)
+	r.calibrateClock()
 	r.log.Info("calibrate", "round", r.round)
 	r.broadcastState()
 	r.sendPatterns()
@@ -307,6 +324,7 @@ func (r *Room) toLobby() {
 			delete(r.players, seat)
 			continue
 		}
+		p.done = false
 		p.steps, p.noteCount = protocol.Grid{}, 0
 		p.notes = nil
 		p.instrument = p.pick

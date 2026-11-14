@@ -34,8 +34,10 @@ test('phone lobby → token reconnect → two conductor rounds → scores → re
       const api: any = {}; let subscribed = false;
       runInNewContext(source, {
         exports: api, WebSocket: Socket, process: { env: { EXPO_PUBLIC_SERVER_URL: url } },
-        setTimeout, clearTimeout, setInterval, clearInterval,
+        // unref: net.ts's keepalive interval never stops, and must not keep the test process alive.
+        setTimeout, clearTimeout, setInterval: (f: () => void, ms: number) => setInterval(f, ms).unref(), clearInterval,
         require: (name: string) => {
+          if (name === 'react-native') return { AppState: { addEventListener: () => {} } };
           assert.equal(name, 'react');
           return { useSyncExternalStore: (subscribe: any, getSnapshot: any) => {
             if (!subscribed) { subscribed = true; subscribe(() => changes.emit('change')); }
@@ -76,11 +78,13 @@ test('phone lobby → token reconnect → two conductor rounds → scores → re
     const next = () => tv!.send(JSON.stringify({ type: 'host_action', action: 'next' }));
     host.api.send({ type: 'host_action', action: 'start' });
     await host.wait(s => s.state.phase === 'compose'); await guest.wait(s => s.state.phase === 'compose');
+    // Compose takes note-editor parts (grids are rejected during compose).
     guest.api.send({ type: 'pattern', notes: [{ id: 'a', row: 1, start: 2, length: 1 }] }); const guestSeat = guest.api.useNet().seat;
     await host.wait(s => s.state.notes?.[guestSeat]?.[0]?.start === 2);
     guest.sockets[0].close(); await guest.wait(s => !s.connected);
     assert.equal((await guest.wait(s => s.connected && s.state.notes?.[guestSeat]?.[0]?.start === 2)).seat, guestSeat);
-    next(); await host.wait(s => s.state.phase === 'calibrate');
+    // The guest is the only human composing (the host conducts), so their Done ends compose early.
+    guest.api.send({ type: 'done', done: true }); await host.wait(s => s.state.phase === 'calibrate');
     host.api.send({ type: 'calibrated', angles: {} }); await host.wait(s => s.state.phase === 'perform');
     // The chart is the song: play the first short note (earlier long ones just miss).
     const target = host.api.useNet().state.scoring.targets.find((t: any) => t.kind === 'flick');

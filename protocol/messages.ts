@@ -61,6 +61,7 @@ export interface PlayerState {
   bot: boolean;
   noteCount: number;
   level: number; // volume 0-100, set by the conductor's tilt
+  done: boolean; // tapped Done in compose; bots always are
 }
 
 export interface PerformanceSummary {
@@ -222,6 +223,7 @@ export type ClientMessage =
   | Pick
   | Leave
   | Kick
+  | Done
   | Ping;
 
 /** GET https://<host>/config (plain HTTP JSON): what the TV's QR code should open. */
@@ -236,6 +238,8 @@ export interface Pick extends Base { type: "pick"; instrument: string | null }
 export interface Leave extends Base { type: "leave" }
 export interface Kick extends Base { type: "kick"; seat: number }
 export interface Kicked extends Base { type: "kicked" }
+/** Compose: mark my part finished (or not). When every composing player is done, compose ends early. */
+export interface Done extends Base { type: "done"; done: boolean }
 /** Keepalive: the server answers every ping with a pong, so a client can tell a live socket from a dead one. */
 export interface Ping extends Base { type: "ping" }
 export interface Pong extends Base { type: "pong" }

@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"orchinizer/protocol"
 )
@@ -347,4 +348,117 @@ func grid(rows ...string) protocol.Grid {
 		}
 	}
 	return g
+}
+
+func done(r *Room, c Client, d bool) {
+	send(r, c, protocol.Done{Envelope: protocol.Envelope{Type: protocol.TypeDone}, Done: d})
+}
+
+func TestComposeEndsWhenEveryoneIsDone(t *testing.T) {
+	r := newTestRoom()
+	tv := joinTV(r)
+	conductor := joinPlayer(r, "Ada") // the host conducts round 1
+	bob := joinPlayer(r, "Bob")
+	cat := joinPlayer(r, "Cat")
+	host(r, tv, protocol.HostStart)
+	if r.phase != protocol.PhaseCompose {
+		t.Fatalf("phase %s", r.phase)
+	}
+
+	done(r, conductor, true)
+	if conductor.lastError() == "" || r.phase != protocol.PhaseCompose {
+		t.Fatal("the conductor has no part to finish")
+	}
+	done(r, bob, true)
+	seats := map[string]bool{}
+	for _, p := range tv.state(t).Players {
+		seats[p.Name] = p.Done
+	}
+	if r.phase != protocol.PhaseCompose || !seats["Bob"] || seats["Cat"] {
+		t.Fatalf("one of two done: phase %s, done %v", r.phase, seats)
+	}
+	done(r, bob, false) // changed their mind
+	done(r, cat, true)
+	if r.phase != protocol.PhaseCompose {
+		t.Fatal("ended while Bob was editing again")
+	}
+	done(r, bob, true)
+	if r.phase != protocol.PhaseCalibrate {
+		t.Fatalf("everyone done but phase is %s", r.phase)
+	}
+	done(r, bob, true)
+	if bob.lastError() == "" {
+		t.Fatal("done accepted outside compose")
+	}
+}
+
+func TestComposeEndsWhenTheLastWriterLeaves(t *testing.T) {
+	r := newTestRoom()
+	tv := joinTV(r)
+	joinPlayer(r, "Ada")
+	bob := joinPlayer(r, "Bob")
+	cat := joinPlayer(r, "Cat")
+	host(r, tv, protocol.HostStart)
+	r.onLeave(bob) // nobody done yet: keep waiting for Cat
+	if r.phase != protocol.PhaseCompose {
+		t.Fatal("ended with nobody done")
+	}
+	done(r, cat, true)
+	if r.phase != protocol.PhaseCalibrate {
+		t.Fatal("a disconnected player held compose up")
+	}
+}
+
+func TestDoneResetsEachRound(t *testing.T) {
+	r := newTestRoom()
+	tv := joinTV(r)
+	ada := joinPlayer(r, "Ada")
+	bob := joinPlayer(r, "Bob")
+	host(r, tv, protocol.HostStart)
+	done(r, bob, true) // round 1: Ada conducts, Bob is the only writer
+	r.onDeadline()     // calibrate → perform
+	r.onDeadline()     // perform → round 2 compose, Bob conducts
+	if r.phase != protocol.PhaseCompose || r.conductor == r.playerByClient(ada).seat {
+		t.Fatalf("round 2: phase %s conductor %d", r.phase, r.conductor)
+	}
+	if r.playerByClient(bob).done || r.composeDone() {
+		t.Fatal("Done carried into the next round")
+	}
+	done(r, ada, true)
+	if r.phase != protocol.PhaseCalibrate {
+		t.Fatal("round 2 didn't end early")
+	}
+}
+
+func TestCalibrateWaitsForAnOfflineConductor(t *testing.T) {
+	r := newTestRoom()
+	tv := joinTV(r)
+	for _, n := range []string{"Ada", "Bob", "Cat"} {
+		joinPlayer(r, n)
+	}
+	host(r, tv, protocol.HostStart)
+	r.onDeadline() // compose -> calibrate
+	p := r.players[r.conductor]
+	r.onLeave(p.client)
+	if !r.waitingForConductor || time.Until(r.deadline) < conductorWait-time.Second {
+		t.Fatalf("calibrate didn't wait for the conductor: waiting=%v left=%v", r.waitingForConductor, time.Until(r.deadline))
+	}
+	r.handle(event{kind: evJoin, client: &fakeClient{}, join: protocol.Join{Role: protocol.RolePlayer, Token: p.token}})
+	if r.waitingForConductor || time.Until(r.deadline) > r.timings.Calibrate {
+		t.Fatalf("reconnect didn't restart calibration: waiting=%v left=%v", r.waitingForConductor, time.Until(r.deadline))
+	}
+}
+
+func TestComposeEndsWhenTheLastUnfinishedWriterLeaves(t *testing.T) {
+	r := newTestRoom()
+	tv := joinTV(r)
+	joinPlayer(r, "Ada")
+	bob := joinPlayer(r, "Bob")
+	cat := joinPlayer(r, "Cat")
+	host(r, tv, protocol.HostStart)
+	done(r, cat, true)
+	r.onLeave(bob)
+	if r.phase != protocol.PhaseCalibrate {
+		t.Fatal("the rest waited on a writer who left")
+	}
 }
